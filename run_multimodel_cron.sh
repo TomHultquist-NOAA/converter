@@ -57,15 +57,16 @@ PY
 mapfile -t CYCLES <<<"$CYCLE_CHOICES"
 printf "UTC cycle eligibility lag: %s hours. Selected: %s\n" "$CYCLE_LAG_HOURS" "${CYCLES[*]}"
 
-# RRFS can remain on your established standalone converter; these are the
-# seven additional sources. Set MODELS=all to process RRFS here too, but do
-# NOT run the original RRFS converter simultaneously on the same Zarr store.
-MODELS="${MODELS:-refs_mean,refs_m001,refs_m002,refs_m003,refs_m004,refs_m005,hrrr}"
+# Unified eight-source processing (RRFS, REFS mean, five REFS members, HRRR).
+# Do NOT run the earlier standalone RRFS converter against the same Zarr store.
+# Override MODELS to process any subset, e.g. MODELS=rrfs for RRFS backfill.
+MODELS="${MODELS:-all}"
 EXTRA=()
 if [[ -n "$WGRIB2_BIN" ]]; then
   EXTRA+=(--wgrib2 "$WGRIB2_BIN")
 fi
 
+printf "Processing model selection: %s\n" "$MODELS"
 FAILED=0
 for choice in "${CYCLES[@]}"; do
   read -r DATE CYCLE <<<"$choice"

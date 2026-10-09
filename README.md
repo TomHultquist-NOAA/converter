@@ -4,7 +4,7 @@ WCOSS2 processing and publishing workflow for the **Office of Modeling and Devel
 
 The processor selects meteorological fields from NOAA GRIB2 inventories, downloads only needed byte ranges, decodes them with `wgrib2`, creates browser-compatible **Zarr v2** stores, and publishes completed datasets and model catalogs to RZDM. It supports concurrent forecast-hour workers, incremental resumption, automated six-hourly operation, and configurable retention on both servers.
 
-**Release:** Version 5 (clean deployment package; standalone three-file edition). The Python processor includes the reusable RRFS decoding/Zarr helpers internally, so the older `rrfs_to_zarr_wcoss2_auto_publish.py` is **not required by this multi-source script**.
+**Release:** Version 5.1 (unified eight-source defaults; clean standalone three-file edition). The Python processor includes the reusable RRFS decoding/Zarr helpers internally, so the older `rrfs_to_zarr_wcoss2_auto_publish.py` is **not required by this multi-source script**.
 
 ## Package contents
 
@@ -25,7 +25,7 @@ No test scripts or development artifacts are included in the deployment archive.
 | `refs_m001` through `refs_m005` | Five REFS ensemble members | F000–F060 |
 | `hrrr` | HRRR surface and pressure products | F000–F048 |
 
-The cron wrapper defaults to the **seven additional sources** (`refs_mean`, `refs_m001`–`refs_m005`, and `hrrr`) to avoid colliding with an existing standalone RRFS processing job. To have this processor manage RRFS as well, set `MODELS=all` or include `rrfs` in the model list **and ensure the old RRFS job is not writing to the same store**.
+The cron wrapper now defaults to **all eight forecast sources**, including RRFS: `MODELS="${MODELS:-all}"`. This matches the current nine-panel viewer. **Disable the old standalone RRFS conversion job** before using the unified processor against the same store.
 
 Fields include the existing surface and pressure variables, **10-m U/V wind components**, **derived 10-m wind speed**, **gust**, and HRRR **FROZR** (frozen rain) and **FRZR** (freezing rain). Input `.idx` inventories determine which fields are actually available for each product and forecast hour; missing fields are not fabricated. Accumulation fields are handled to avoid treating incremental precipitation as forecast-total precipitation.
 
@@ -89,7 +89,7 @@ Process or resume a known cycle (uses your existing local output/work directorie
 ```bash
 python3 multi_model_to_zarr_wcoss2.py \
   --date 20261009 --cycle 06 \
-  --models refs_mean,refs_m001,refs_m002,refs_m003,refs_m004,refs_m005,hrrr \
+  --models all \
   --workers 8 \
   --wgrib2 /apps/ops/prod/libs/intel/19.1.3.304/cray-mpich/8.1.4/wgrib2/3.8.0/bin/wgrib2 \
   --output-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr \
@@ -127,7 +127,7 @@ Key settings at the top of `run_multimodel_cron.sh`:
 | `CYCLE_LAG_HOURS` | `3.5` | Initialization must be at least 3 h 30 min old before automatic selection |
 | `CATCHUP_CYCLES` | `1` | Revisit one earlier six-hour cycle (0–3 supported) |
 | `RETENTION_DAYS` | `7` | Keep cycles on both WCOSS2 and RZDM |
-| `MODELS` | Seven REFS/HRRR sources | Model IDs to process; RRFS excluded by default |
+| `MODELS` | `all` (all eight sources) | RRFS, REFS mean, REFS members 1–5, HRRR; can be narrowed to one or several sources |
 | `PYTHON_BIN`, `WGRIB2_BIN` | WCOSS2 values above | Executables; use absolute paths for cron where needed |
 
 The corresponding direct-Python auto mode is:
@@ -158,6 +158,25 @@ python3 multi_model_to_zarr_wcoss2.py \
 ```
 
 Use `--no-local-cleanup` or `--no-remote-cleanup` to disable one side. To change retention on scheduled runs, set `RETENTION_DAYS` in the wrapper. Historical backfills older than the retention window may be immediately excluded or deleted; increase retention before backfilling those dates.
+
+## RRFS and the current model viewer
+
+**Important for users upgrading from the seven-source cron wrapper:** earlier versions defaulted to processing only REFS members, REFS mean, and HRRR. Version 5.1 enables RRFS in the six-hourly workflow too. That is why `catalog_rrfs.json` and recent `rrfs_YYYYMMDD_CC00.zarr/` folders were previously absent even though the other seven sources were successful.
+
+The updated viewer (V7.18+) reads RRFS from **`data/catalog_rrfs.json`**, not the legacy **`data/catalog.json`**. The unified publisher creates and updates the former without deleting or overwriting the latter. Make sure you deploy both updated configurations and publish at least one RRFS cycle. Until RRFS has been processed for a selected cycle, that panel correctly displays *No matching cycle*.
+
+To backfill an existing initialization with **RRFS only** (the new script will skip completed forecast hours):
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date 20261009 --cycle 06 --models rrfs --workers 8 \
+  --wgrib2 /apps/ops/prod/libs/intel/19.1.3.304/cray-mpich/8.1.4/wgrib2/3.8.0/bin/wgrib2 \
+  --output-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr \
+  --work-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work \
+  --retention-days 7
+```
+
+Change `--date` / `--cycle` for the backfill needed. The cron wrapper automatically revisits only the newest cycle and the configured number of previous cycles (`CATCHUP_CYCLES`, default 1), **not** all past seven days. Backfill older cycles explicitly if you want them in the viewer's full seven-day cycle list.
 
 ## Outputs and troubleshooting
 
