@@ -12,6 +12,7 @@ The processor selects meteorological fields from NOAA GRIB2 inventories, downloa
 | --- | --- |
 | `multi_model_to_zarr_wcoss2.py` | Main processor, Zarr conversion, publishing and retention |
 | `run_multimodel_cron.sh` | Automatic cycle selection, catch-up, locking and logging |
+| `converter_cron_env.sh` | Minimal WCOSS2 module/environment setup for cron |
 | `README.md` | Deployment, usage and maintenance instructions |
 
 No test scripts or development artifacts are included in the deployment archive.
@@ -52,8 +53,8 @@ The cron wrapper is already configured with these paths:
 BASE_DIR="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing"
 OUTPUT_ROOT="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr"
 WORK_ROOT="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-WGRIB2_BIN="${WGRIB2_BIN:-/apps/ops/prod/libs/intel/19.1.3.304/cray-mpich/8.1.4/wgrib2/3.8.0/bin/wgrib2}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
+WGRIB2_BIN="${WGRIB2_BIN:-$(command -v wgrib2 || true)}"
 ```
 
 It also exports `OMP_NUM_THREADS=1`, `OMP_THREAD_LIMIT=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` to prevent OpenMP thread exhaustion while multiple Python workers invoke `wgrib2`. The Python script applies the same settings when run directly.
@@ -111,11 +112,34 @@ Run it manually first:
 /bin/bash /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/run_multimodel_cron.sh
 ```
 
-Recommended cron entry (assuming the cron host uses UTC):
+Recommended crontab (assuming the cron host uses UTC):
 
 ```cron
-0 4,10,16,22 * * * /bin/bash /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/run_multimodel_cron.sh >> /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/cron_errors.log 2>&1
+SHELL=/bin/bash
+USERSHELL=/bin/bash
+MAILTO=""
+7 4,10,16,22 * * * /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/run_multimodel_cron.sh >> /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/cron_errors.log 2>&1
 ```
+
+Run `chmod 750 run_multimodel_cron.sh` after installing. The wrapper sources
+`converter_cron_env.sh` (not the complete `.bashrc`); it initializes the
+`module` command, loads compiler/MPI, `wgrib2/3.8.0` and `python/3.10.4`,
+then resolves executable paths from the loaded module environment.
+If your site's modules initialization file differs, set `MODULE_INIT_FILE`
+near the top of `converter_cron_env.sh` or in the crontab. Do not use
+`bash -l` or other login-shell workarounds.
+
+The installed module versions follow the supplied interactive `.bashrc`, but
+may need adjustment for changes on WCOSS2. Test the environment independently:
+
+```bash
+cd /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing
+/bin/bash -c 'set -e; source ./converter_cron_env.sh; command -v python3; python3 --version; command -v wgrib2; wgrib2 -version'
+```
+
+Note: WCOSS2 guidance says that cron-launched heavy computation should be
+submitted to PBS; this version deliberately does not change execution mode.
+
 
 The wrapper logs normal processing internally; `cron_errors.log` can capture unexpected startup output. If the host is not set to UTC, adapt the schedule accordingly.
 
