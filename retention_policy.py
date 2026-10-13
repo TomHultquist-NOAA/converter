@@ -26,6 +26,9 @@ DATE_RE = re.compile(r'^\d{8}$')
 HOUR_RE = re.compile(r'^\d{10}$')
 CYCLE_RE = re.compile(r'^(\d{8})_(00|06|12|18)$')
 UTC = dt.timezone.utc
+# Protect the verifying analysis for every saved model cycle, F000 through F084.
+CYCLE_ANALYSIS_FHR = 84
+ALL_PRODUCT_TUPLE = tuple(sorted(ALL_PRODUCTS))
 
 
 class ProtectionPolicy(NamedTuple):
@@ -81,6 +84,7 @@ def load_policy(path: Path) -> ProtectionPolicy:
         raise ValueError(f'Invalid retention configuration: {source}')
     models = set()
     rules = []
+    seen_cycles = set()
     for idx, entry in enumerate(cfg['protected_cycles']):
         if isinstance(entry, str):
             cyc = entry
@@ -101,17 +105,25 @@ def load_policy(path: Path) -> ProtectionPolicy:
         date, hh = cyc.split('_')
         for model in selected:
             models.add(f'{model}_{date}_{hh}00.zarr')
+        # Older v6.6 whitelists may include explicit analysis_through_fhr and
+        # analysis_sources options. Accept and validate them for compatibility,
+        # but never let them restrict the now-mandatory F000–F084 / all-source
+        # protection attached to every preserved forecast cycle.
         if isinstance(entry, dict):
             if 'analysis_sources' in entry and 'analysis_through_fhr' not in entry:
                 raise ValueError(f'analysis_sources requires analysis_through_fhr at index {idx}')
             if 'analysis_through_fhr' in entry:
                 lead = entry['analysis_through_fhr']
                 if isinstance(lead, bool) or not isinstance(lead, int) or not 0 <= lead <= 744:
-                    raise ValueError(f'Invalid analysis_through_fhr at index {idx} (0..744)')
-                begin = _cycle(cyc)
-                finish = begin + dt.timedelta(hours=lead)
-                rules.append((begin.strftime('%Y%m%d%H'), finish.strftime('%Y%m%d%H'),
-                              _products(entry.get('analysis_sources', ['all']))))
+                    raise ValueError(f'Invalid legacy analysis_through_fhr at index {idx} (0..744)')
+                if 'analysis_sources' in entry:
+                    _products(entry['analysis_sources'])
+        if cyc not in seen_cycles:
+            seen_cycles.add(cyc)
+            begin = _cycle(cyc)
+            finish = begin + dt.timedelta(hours=CYCLE_ANALYSIS_FHR)
+            rules.append((begin.strftime('%Y%m%d%H'), finish.strftime('%Y%m%d%H'),
+                          ALL_PRODUCT_TUPLE))
 
     for idx, entry in enumerate(cfg.get('protected_analysis', [])):
         if isinstance(entry, str):

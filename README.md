@@ -1,10 +1,10 @@
 # OMD EVU Unified Model and Verification Converter
 
-**Version 6.6 — WCOSS2 operational source**
+**Version 6.7 — WCOSS2 operational source**
 
 Downloads operational forecast and verification GRIB2 products, converts selected fields to browser-readable Zarr v2, generates catalogs, and publishes the results to the OMD EVU Model Viewer web server. The pipeline uses Python 3.10+ (standard library only) and an existing `wgrib2` executable; it does not require installing packages on WCOSS2.
 
-**One hourly cron job** handles both workflows: RAP, RTMA, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **14-day retention** policy for regular data, plus an optional indefinite whitelist for model cycles and hourly verification/analysis sources. A shared `flock` lock prevents concurrent cron runs.
+**One hourly cron job** handles both workflows: RAP, RTMA, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **14-day retention** policy for regular data, plus an indefinite case-study whitelist. Protecting any model cycle **automatically preserves all verifying analyses from F000 through F084**. A shared `flock` lock prevents concurrent cron runs.
 
 ## Repository contents
 
@@ -84,13 +84,18 @@ The sample cron runs at **HH+10 UTC**, as in the current deployment. Its verific
 
 Common optional settings: `WORKERS=8`, `RETENTION_DAYS=14`, `PROTECTED_CYCLES_FILE=/path/to/protected_cycles.json`, `CYCLE_LAG_HOURS=3.5`, `CATCHUP_CYCLES=1`, `VERIFY_LOOKBACK_HOURS=20`, `MRMS_STRIDE=1`, `MODELS=all`, `NO_PUBLISH=1` (test), `PUBLISH_HOST`, and `PUBLISH_DIR`.
 
-## Retention: 14 days and permanent model/analysis protection
+## Retention: 14 days and automatic case-study protection
 
 **Every model and verification/analysis source uses the same 14-day default** on WCOSS2 and RZDM. Model age is measured from UTC cycle initialization, and Analysis age is measured from UTC valid hour. The cron wrapper passes `RETENTION_DAYS=14` and **the same whitelist file** to both model and verification workflows. The standalone `verification_ingest.py` and `verification_convert.py` tools also validate the whitelist before cleanup. If an existing cron environment overrides `RETENTION_DAYS=7`, remove that override or change it to 14.
 
-Edit the operational `protected_cycles.json` to keep selected cases **indefinitely**. It is deliberately excluded from GitHub and the release ZIP. Your existing v6.5 file remains valid without edits (its schema identifier stays `omd-evu-protected-cycles-1`). To start a new file, use `cp -n protected_cycles.example.json protected_cycles.json`. Never overwrite a populated operational whitelist when installing updates.
+Edit the operational `protected_cycles.json` to protect complete case studies **indefinitely**. It is deliberately excluded from GitHub and the release ZIP. Existing v6.5/v6.6 whitelist files continue working without edits (schema identifier remains `omd-evu-protected-cycles-1`). To initialize a new one, use `cp -n protected_cycles.example.json protected_cycles.json`. **Never overwrite your operational whitelist during an upgrade.**
 
-The following example shows **three independent ways** to protect cases:
+**Protecting a model cycle always protects both:**
+
+1. All selected model Zarr stores initialized in that cycle (by default, all eight models).
+2. **Every available verifying analysis product**—MRMS composite reflectivity, precipitation rate and hourly QPE; RAP surface and pressure analyses; RTMA; URMA—at every UTC valid hour **from F000 through F084, inclusive**. This applies even if only one model is specified, or if the whitelist uses the older simple string syntax. There is no model-only retention mode and no need to specify an analysis duration or source list.
+
+For example:
 
 ```json
 {
@@ -100,13 +105,10 @@ The following example shows **three independent ways** to protect cases:
     {
       "date": "20261010",
       "cycle": "06",
-      "models": ["refs_mean", "refs_m001"],
-      "analysis_through_fhr": 60,
-      "analysis_sources": ["mrms", "rap", "urma", "rtma"]
+      "models": ["refs_mean", "refs_m001"]
     }
   ],
   "protected_analysis": [
-    "2026100912",
     {
       "start": "2026100800",
       "end": "2026100818",
@@ -116,17 +118,17 @@ The following example shows **three independent ways** to protect cases:
 }
 ```
 
-**What this protects:**
+**Example:** `"20261012_18"` protects all eight forecast-model cycle stores and **all seven analysis products** for valid hours from **2026-10-12 18 UTC through 2026-10-16 06 UTC** (F000–F084). The second entry protects only two REFS model stores, but still protects **all** verifying analyses for the full 84-hour period. The `protected_analysis` array is optional and permits independent protection of analysis hours that are not attached to a selected model cycle.
 
-- `"20261012_18"` preserves **all eight forecast model stores** initialized at October 12, 18 UTC. Existing string entries remain **model-only** to avoid unexpectedly retaining large amounts of MRMS data.
-- The October 10, 06 UTC object preserves the specified REFS models **and all selected verification products valid F000–F060** (October 10 06 UTC through October 12 18 UTC, inclusive). Set `analysis_through_fhr` to the desired forecast lead, e.g. `84`; omit `analysis_sources` to protect all four verification source families.
-- `"2026100912"` preserves **all analysis products** valid at that one UTC hour, independent of any model cycle. The `start`/`end` object preserves only MRMS and URMA over an inclusive UTC valid-hour range. Set `sources` to `["all"]` or omit it to preserve every analysis product.
+For `protected_analysis`, accepted source groups are **`mrms`**, **`rap`**, **`rtma`**, and **`urma`**, plus individual product names (`mrms_apcp`, `rap_pressure`, etc.). Times use UTC `YYYYMMDDHH`; model cycles use `YYYYMMDD_CC` (`CC` = 00, 06, 12, 18). Independent analysis `through_fhr` ranges may span up to 744 hours, and explicit start/end ranges may cover up to 366 days.
 
-`protected_analysis` is optional. Accepted analysis source groups are **`mrms`** (reflectivity, precipitation rate, one-hour QPE), **`rap`** (surface and pressure analyses), **`rtma`**, and **`urma`**. Individual product names such as `mrms_apcp` or `rap_pressure` are also accepted. Times are UTC `YYYYMMDDHH`, while cycles are `YYYYMMDD_CC` (`CC` = 00, 06, 12, 18). `through_fhr` and `analysis_through_fhr` allow an inclusive 0–744-hour lead; explicit start/end ranges can cover up to 366 days.
+**Compatibility with older whitelists:** Legacy `analysis_through_fhr` and `analysis_sources` options within a `protected_cycles` object are still accepted and validated, **but no longer narrow protection**. Every protected model cycle now automatically retains every verifying analysis through F084 regardless of their old values. You may remove those legacy keys for clarity whenever convenient.
 
-Protected **model and analysis Zarr stores and their catalog entries** are retained on both hosts. Model selections, archives and dated work-cycle directories are also exempt; protected analysis staging manifests/remaining GRIBs are retained by hour. Routine logs are still removed after 14 days. **Protected analyses do not expire merely because URMA becomes available**; RTMA and URMA are distinct data sources, with the viewer preferring URMA at the same valid time.
+The protection rules cover **model and analysis Zarr stores, their local and published catalogs, and supported staging/archives** on both WCOSS2 and RZDM. Older protected cycles and analyses remain selectable in the viewer after routine retention cleanup. Routine logs continue to expire after 14 days. RTMA and URMA remain distinct protected sources even when the viewer prefers URMA for a given hour.
 
-**Fail-safe behavior:** The configuration is checked at the beginning of **every** unified hourly verification and model invocation. Missing, invalid, or symlinked whitelists prevent processing/cleanup instead of silently treating everything as unprotected. RZDM receives validated analysis protection rules and uses them for remote cleanup. Removing an entry makes its data eligible for expiry at the next cleanup. Already-deleted data cannot be restored by adding a whitelist entry; protect it before it expires. Protecting long periods of native-resolution MRMS data can consume substantial disk space.
+**This is preservation, not automatic historical acquisition.** The hourly verification workflow still attempts its configured recent lookback window; whitelisting a cycle does not recreate an analysis hour that was already deleted or never ingested. Protect the cycle while its verifying data are still available, and use a separate targeted backfill when necessary.
+
+**Fail-safe behavior:** The configuration is checked at the beginning of **every** unified hourly verification and model invocation. Missing, invalid, or symlinked whitelists prevent processing/cleanup instead of silently treating everything as unprotected. RZDM receives validated analysis protection rules and uses them for remote cleanup. Removing an entry makes its data eligible for expiry at the next cleanup. Already-deleted data cannot be restored by adding a whitelist entry; protect it before it expires.
 
 **Preview model cleanup** after maintenance (only when cron/other converters are stopped):
 
