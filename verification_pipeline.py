@@ -21,11 +21,12 @@ import sys
 
 import verification_ingest as ingest
 import verification_convert as convert
+from retention_policy import load_policy, protects_analysis, rules_json
 
 LOG = logging.getLogger('evu-unified-verify')
 PRODUCTS = tuple(convert.STAGED_PRODUCTS)
 UTC = dt.timezone.utc
-STORE_RE = re.compile(r'^analysis_(mrms_refc|mrms_prate|mrms_apcp|urma|rap_surface|rap_pressure)_(\d{10})\.zarr$')
+STORE_RE = re.compile(r'^analysis_(mrms_refc|mrms_prate|mrms_apcp|urma|rtma|rap_surface|rap_pressure)_(\d{10})\.zarr$')
 
 
 def completed_store(store: Path) -> bool:
@@ -54,12 +55,29 @@ from pathlib import Path
 from datetime import datetime, timezone
 import json, os, re, shutil, sys
 root=Path(sys.argv[1]); cutoff_text=sys.argv[2]; dry=sys.argv[3]=='1'
+# Validated UTC hours + product list, transferred as JSON; never accept paths.
+products={'mrms_refc','mrms_prate','mrms_apcp','rap_surface','rap_pressure','urma','rtma'}
+try:
+    rules=json.loads(sys.argv[4])
+    if not isinstance(rules,list):raise ValueError('Not an array')
+    for item in rules:
+        if not isinstance(item,list) or len(item)!=3:raise ValueError('Invalid interval')
+        start,end,names=item
+        if not isinstance(start,str) or not isinstance(end,str) or not re.fullmatch(r'\d{10}',start) or not re.fullmatch(r'\d{10}',end):raise ValueError('Invalid UTC hours')
+        t0=datetime.strptime(start,'%Y%m%d%H');t1=datetime.strptime(end,'%Y%m%d%H')
+        if t1<t0 or (t1-t0).days>366:raise ValueError('Invalid interval span')
+        if not isinstance(names,list) or not names or any(not isinstance(x,str) or x not in products for x in names):raise ValueError('Invalid source names')
+except (IndexError,ValueError,TypeError) as exc:
+    raise SystemExit('Unsafe protected analysis configuration: '+str(exc))
+def pinned(name):
+    m=re.fullmatch(r'analysis_(mrms_refc|mrms_prate|mrms_apcp|urma|rtma|rap_surface|rap_pressure)_(\d{10})\.zarr',name)
+    return bool(m and any(start<=m.group(2)<=end and m.group(1) in names for start,end,names in rules))
 if not root.is_absolute() or root.name!='data' or root.is_symlink() or not root.is_dir():
     raise SystemExit('Unsafe remote data directory')
 if not re.match(r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$', cutoff_text):
     raise SystemExit('Invalid cutoff')
 cutoff=datetime.strptime(cutoff_text,'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-pattern=re.compile(r'^analysis_(?:mrms_refc|mrms_prate|mrms_apcp|urma|rap_surface|rap_pressure)_(\d{10})\.zarr$')
+pattern=re.compile(r'^analysis_(mrms_refc|mrms_prate|mrms_apcp|urma|rtma|rap_surface|rap_pressure)_(\d{10})\.zarr$')
 folder=root/'analysis'
 pending=root/'.catalog_analysis.json.incoming'
 # Validate catalog and every referenced Zarr BEFORE making the catalog visible.
@@ -84,8 +102,8 @@ if folder.is_dir() and not folder.is_symlink():
     for child in folder.iterdir():
         m=pattern.fullmatch(child.name)
         if not m or child.is_symlink() or not child.is_dir():continue
-        when=datetime.strptime(m.group(1),'%Y%m%d%H').replace(tzinfo=timezone.utc)
-        if when>=cutoff:continue
+        when=datetime.strptime(m.group(2),'%Y%m%d%H').replace(tzinfo=timezone.utc)
+        if when>=cutoff or pinned(child.name):continue
         print(('WOULD REMOVE ' if dry else 'REMOVE ')+str(child),flush=True)
         if not dry:shutil.rmtree(str(child))
         removed+=1
@@ -93,18 +111,39 @@ print('Analysis retention removed='+str(removed),flush=True)
 '''
 
 
-def publish_catalog(catalog: Path, host: str, remote_dir: str, days: int, cutoff=None):
+def publish_catalog(catalog: Path, host: str, remote_dir: str, days: int, cutoff=None, analysis_rules=()):
     cutoff = cutoff or dt.datetime.now(UTC) - dt.timedelta(days=days)
     cutoff_text = cutoff.strftime('%Y-%m-%dT%H:%M:%SZ')
     remote_tmp = remote_dir.rstrip('/')+'/.catalog_analysis.json.incoming'
     # subprocess argv: do not invoke an interpolated local shell.
     subprocess.run(['scp',str(catalog),f'{host}:{remote_tmp}'],check=True)
-    args = 'python3 - '+shlex.quote(remote_dir)+' '+shlex.quote(cutoff_text)+' 0'
+    args = 'python3 - '+shlex.quote(remote_dir)+' '+shlex.quote(cutoff_text)+' 0 '+shlex.quote(rules_json(analysis_rules))
     subprocess.run(['ssh',host,args],input=REMOTE_ANALYSIS_FINALIZE,text=True,check=True)
 
 
+
+def cleanup_analysis_archives(work: Path, days: int, now: dt.datetime, rules=()):
+    """Expire leftover analysis publication TARs, never removing pinned hours."""
+    cutoff = now - dt.timedelta(days=days)
+    removed = 0
+    for entry in work.iterdir() if work.is_dir() and not work.is_symlink() else ():
+        if not entry.is_file() or entry.is_symlink():
+            continue
+        m = re.fullmatch(r'analysis_(mrms_refc|mrms_prate|mrms_apcp|urma|rtma|rap_surface|rap_pressure)_(\d{10})\.tar(?:\.bz2)?', entry.name)
+        if not m:
+            continue
+        try:
+            when = dt.datetime.strptime(m.group(2), '%Y%m%d%H').replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if when < cutoff and not protects_analysis(f'analysis_{m.group(1)}_{m.group(2)}.zarr', rules):
+            entry.unlink()
+            removed += 1
+    return removed
+
 def run(a, publish_store, validate_publisher, now=None):
     now = now or dt.datetime.now(UTC)
+    policy = load_policy(a.protected_cycles_file)  # fail closed before conversion, deletion, or publication
     config = ingest.load_json(a.config)
     if config.get('schema')!='omd-evu-verification-source-map-1':
         raise ValueError('Verification source map has an unexpected schema')
@@ -183,8 +222,9 @@ def run(a, publish_store, validate_publisher, now=None):
         LOG.info('Verification GRID INSPECTION %s',summary)
         return 1 if summary['failed'] else 0
     if not a.no_local_cleanup:
-        summary['pruned_stores']=convert.prune(out,a.retention_days,now)
-        summary['pruned_staging_days']=ingest.cleanup(stage,now,a.retention_days)
+        summary['pruned_stores']=convert.prune(out,a.retention_days,now,policy.analysis_rules)
+        summary['pruned_staging_days']=ingest.cleanup(stage,now,a.retention_days,policy.analysis_rules)
+        summary['pruned_archives']=cleanup_analysis_archives(work,a.retention_days,now,policy.analysis_rules)
     count=convert.build_catalog(out)
     LOG.info('catalog_analysis.json: %d datasets',count)
     if not a.no_publish:
@@ -223,7 +263,8 @@ def run(a, publish_store, validate_publisher, now=None):
         else:
             try:
                 publish_catalog(catalog,a.publish_host,a.publish_dir,a.retention_days,
-                                cutoff=now-dt.timedelta(days=a.retention_days))
+                                cutoff=now-dt.timedelta(days=a.retention_days),
+                                analysis_rules=policy.analysis_rules)
                 atomic_state(state_path,fresh)
                 LOG.info('Published catalog_analysis.json LAST')
             except Exception as exc:
@@ -243,7 +284,10 @@ def main(argv=None, *, publish_store, validate_publisher, default_publish_host=N
     p.add_argument('--wgrib2',default=shutil.which('wgrib2'))
     p.add_argument('--lookback-hours',type=int,default=20)
     p.add_argument('--mrms-stride',type=int,default=1)
-    p.add_argument('--retention-days',type=int,default=7)
+    p.add_argument('--retention-days',type=int,default=14)
+    p.add_argument('--protected-cycles-file',type=Path,
+                   default=Path(__file__).with_name('protected_cycles.json'),
+                   help='Shared model/analysis permanent-retention whitelist')
     p.add_argument('--compression-level',type=int,default=3)
     p.add_argument('--timeout',type=int,default=120)
     p.add_argument('--retries',type=int,default=3)

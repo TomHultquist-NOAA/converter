@@ -1254,7 +1254,27 @@ def finalize_accums(store, manifest, level):
     return updated
 
 
-def scan_stores(output_root, retention_days=None, as_of=None):
+# Retention exceptions are defined once on WCOSS2 and passed explicitly to
+# RZDM, so both hosts make identical deletion/catalog decisions.
+DEFAULT_PROTECTED_CYCLES_FILE = Path(__file__).with_name('protected_cycles.json')
+
+
+def load_protected_cycles(path):
+    """Validate the shared model/analysis whitelist and return protected model stores."""
+    from retention_policy import load_policy
+    policy = load_policy(path)
+    logging.info('Loaded %d protected model stores and %d analysis intervals from %s',
+                 len(policy.model_stores), len(policy.analysis_rules), path)
+    return policy.model_stores
+
+
+def is_protected(protected_stores, date, cycle, model=None):
+    if model is None:
+        return any(f'{name}_{date}_{cycle}00.zarr' in protected_stores for name in MODELS)
+    return f'{model}_{date}_{cycle}00.zarr' in protected_stores
+
+
+def scan_stores(output_root, retention_days=None, as_of=None, protected_stores=()):
     """Construct viewer catalogs, optionally excluding cycles beyond retention."""
     now = as_of or dt.datetime.now(dt.timezone.utc)
     cutoff = (now - dt.timedelta(days=retention_days)) if retention_days else None
@@ -1264,7 +1284,7 @@ def scan_stores(output_root, retention_days=None, as_of=None):
         if not m or not store.is_dir():
             continue
         model, date, cycle = m.groups()
-        if cutoff is not None and iso_init(date, cycle) < cutoff:
+        if cutoff is not None and iso_init(date, cycle) < cutoff and not is_protected(protected_stores, date, cycle, model):
             continue
         try:
             attrs = json.loads((store/'.zattrs').read_text())
@@ -1388,6 +1408,17 @@ cutoff_body = cutoff_text[:-1]
 cutoff_format = '%Y-%m-%dT%H:%M:%S.%f' if '.' in cutoff_body else '%Y-%m-%dT%H:%M:%S'
 cutoff = dt.datetime.strptime(cutoff_body, cutoff_format).replace(tzinfo=dt.timezone.utc)
 dry_run = sys.argv[3] == '1'
+# Generated exclusively from validated WCOSS2 configuration; never accepts paths.
+try:
+    protected_names = json.loads(sys.argv[4])
+    if (not isinstance(protected_names, list) or
+        any(not isinstance(name, str) or
+            not re.fullmatch(r'(rrfs|refs_mean|refs_m00[1-5]|hrrr)_\d{8}_(00|06|12|18)00\.zarr', name)
+            for name in protected_names)):
+        raise ValueError('Invalid protected model name')
+    protected = set(protected_names)
+except (IndexError, TypeError, ValueError) as exc:
+    raise SystemExit('Refusing unsafe protected-cycle configuration: ' + str(exc))
 if not root.is_absolute() or root.name != 'data' or root.is_symlink() or not root.is_dir():
     raise SystemExit('Refusing unsafe or nonexistent remote data directory: ' + str(root))
 # Strict allow-list for only this processor's output and the existing RRFS store.
@@ -1415,7 +1446,7 @@ for child in sorted(root.iterdir()):
         init = dt.datetime.strptime(match.group(2) + match.group(3), '%Y%m%d%H').replace(tzinfo=dt.timezone.utc)
     except ValueError:
         continue
-    if init >= cutoff:
+    if init >= cutoff or child.name in protected:
         continue
     print(('WOULD REMOVE ' if dry_run else 'REMOVE ') + str(child), flush=True)
     pruned.add(child.name)
@@ -1439,7 +1470,7 @@ for cat, obj in catalogs:
         except ValueError:
             keep.append(entry)
             continue
-        if cycle_init >= cutoff and (root / name).is_dir() and not (root / name).is_symlink():
+        if (cycle_init >= cutoff or name in protected) and (root / name).is_dir() and not (root / name).is_symlink():
             keep.append(entry)
     removed = len(datasets) - len(keep)
     if removed:
@@ -1494,8 +1525,8 @@ def _cycle_from_parts(date, cycle):
         return None
 
 
-def cleanup_local(output_root, work_root, retention_days=7, dry_run=False,
-                  now=None, logs_dir=None):
+def cleanup_local(output_root, work_root, retention_days=14, dry_run=False,
+                  now=None, logs_dir=None, protected_stores=()):
     """Expire recognized WCOSS2 artifacts using init UTC (not filesystem mtime).
 
     Retention policy: only cycle-scoped stores, selection manifests, summaries,
@@ -1521,11 +1552,13 @@ def cleanup_local(output_root, work_root, retention_days=7, dry_run=False,
     stats = {'stores': 0, 'manifests': 0, 'summaries': 0,
              'archives': 0, 'work_cycles': 0, 'logs': 0, 'catalog_entries': 0}
 
-    def eligible(child, match, date_index, cycle_index):
+    def eligible(child, match, date_index, cycle_index, model_index=1, fixed_model=None):
         if child.is_symlink():
             return False
-        init = _cycle_from_parts(match.group(date_index), match.group(cycle_index))
-        return init is not None and init < cutoff
+        date, cycle = match.group(date_index), match.group(cycle_index)
+        init = _cycle_from_parts(date, cycle)
+        model = fixed_model if fixed_model is not None else (match.group(model_index) if model_index else None)
+        return init is not None and init < cutoff and not is_protected(protected_stores, date, cycle, model)
 
     def remove(path, category, directory):
         if path.is_symlink() or (not path.is_dir() if directory else not path.is_file()):
@@ -1565,7 +1598,7 @@ def cleanup_local(output_root, work_root, retention_days=7, dry_run=False,
                 remove(child, 'manifests', False)
                 continue
             match = LOCAL_SUMMARY_RE.fullmatch(child.name)
-            if match and eligible(child, match, 1, 2):
+            if match and eligible(child, match, 1, 2, model_index=None):
                 remove(child, 'summaries', False)
 
     if work.exists():
@@ -1582,7 +1615,7 @@ def cleanup_local(output_root, work_root, retention_days=7, dry_run=False,
                 continue
             for child in sorted(model_root.iterdir()):
                 match = LOCAL_WORK_CYCLE_RE.fullmatch(child.name)
-                if match and eligible(child, match, 1, 2):
+                if match and eligible(child, match, 1, 2, fixed_model=model):
                     remove(child, 'work_cycles', True)
 
     if logs is not None and logs.exists():
@@ -1613,7 +1646,7 @@ def cleanup_local(output_root, work_root, retention_days=7, dry_run=False,
                 continue
             init = _cycle_from_parts(match.group(2), match.group(3))
             store_path = out / name
-            if init is not None and init >= cutoff and store_path.is_dir() and not store_path.is_symlink():
+            if (init is not None and (init >= cutoff or is_protected(protected_stores, match.group(2), match.group(3), match.group(1))) and store_path.is_dir() and not store_path.is_symlink()):
                 keep.append(entry)
         removed = len(entries) - len(keep)
         if removed:
@@ -1641,14 +1674,14 @@ def validate_publisher(host, remote_dir):
                          'use --no-remote-cleanup for a different publish directory')
 
 
-def cleanup_remote(host, remote_dir, retention_days=7, dry_run=False, now=None):
+def cleanup_remote(host, remote_dir, retention_days=14, dry_run=False, now=None, protected_stores=()):
     """Remove only date-stamped modeled .zarr stores older than retention."""
     validate_publisher(host, remote_dir)
     if not shutil.which('ssh'):
         raise RuntimeError('Remote retention requires ssh')
     now = now or dt.datetime.now(dt.timezone.utc)
     cutoff = (now - dt.timedelta(days=retention_days)).isoformat().replace('+00:00', 'Z')
-    cmd = 'python3 - ' + shlex.quote(remote_dir) + ' ' + shlex.quote(cutoff) + ' ' + ('1' if dry_run else '0')
+    cmd = ('python3 - ' + shlex.quote(remote_dir) + ' ' + shlex.quote(cutoff) + ' ' + ('1' if dry_run else '0') + ' ' + shlex.quote(json.dumps(sorted(protected_stores))))
     logging.info('RZDM retention: %s stores initialized before %s (%s)',
                  'would remove' if dry_run else 'removing', cutoff, remote_dir)
     return subprocess.run(['ssh', host, cmd], input=REMOTE_RETENTION_SCRIPT,
@@ -1707,7 +1740,9 @@ def arguments(argv=None):
     p.add_argument('--publish-host',default=core.DEFAULT_PUBLISH_HOST)
     p.add_argument('--publish-dir',default=core.DEFAULT_PUBLISH_DIR)
     p.add_argument('--keep-publish-archive',action='store_true')
-    p.add_argument('--retention-days',type=int,default=7,help='Keep this many days of initialization cycles on WCOSS2 and RZDM (default 7)')
+    p.add_argument('--retention-days',type=int,default=14,help='Keep this many days of initialization cycles on WCOSS2 and RZDM (default 14)')
+    p.add_argument('--protected-cycles-file',type=Path,default=DEFAULT_PROTECTED_CYCLES_FILE,
+                   help='JSON whitelist of cycles/models preserved indefinitely; required for safe cleanup')
     p.add_argument('--no-local-cleanup',action='store_true',help='Disable WCOSS2 Zarr, scratch, and summary retention')
     p.add_argument('--logs-dir',default=None,help='Optional cron log directory; expire only multisource_YYYYMMDD_HHMMSS.log files')
     p.add_argument('--no-remote-cleanup',action='store_true',help='Disable SSH retention cleanup')
@@ -1744,6 +1779,10 @@ def arguments(argv=None):
             raise ValueError('--cleanup-only incompatible with --overwrite-hours')
     except ValueError as e:
         p.error(str(e))
+    try:
+        a.protected_stores = load_protected_cycles(a.protected_cycles_file)
+    except ValueError as exc:
+        p.error(str(exc))
     return a
 
 
@@ -1805,9 +1844,11 @@ def main(argv=None):
     if a.cleanup_only:
         if not a.no_local_cleanup:
             cleanup_local(a.output_root, a.work_root, a.retention_days,
-                          a.cleanup_dry_run, logs_dir=a.logs_dir)
+                          a.cleanup_dry_run, logs_dir=a.logs_dir,
+                          protected_stores=a.protected_stores)
         if not (a.no_publish or a.no_remote_cleanup):
-            cleanup_remote(a.publish_host, a.publish_dir, a.retention_days, a.cleanup_dry_run)
+            cleanup_remote(a.publish_host, a.publish_dir, a.retention_days,
+                           a.cleanup_dry_run, protected_stores=a.protected_stores)
         return
     if not (a.no_publish or a.no_remote_cleanup):
         validate_publisher(a.publish_host, a.publish_dir)
@@ -1938,14 +1979,16 @@ def main(argv=None):
         for model,store in stores.items():
             if model in manifests:
                 finalize_accums(store,manifests[model],a.compression_level)
-    catalog_paths=scan_stores(out, retention_days=a.retention_days)
+    catalog_paths=scan_stores(out, retention_days=a.retention_days,
+                              protected_stores=a.protected_stores)
     logging.info('Wrote %d model-specific catalogs: %s',len(catalog_paths),', '.join(catalog_paths))
     if not (a.no_publish or a.catalog_only):
         # Prune before copying the new stores. This frees old data first and
         # lowers the risk of exhausting RZDM disk quota during large SCPs.
         if not a.no_remote_cleanup:
             try:
-                cleanup_remote(a.publish_host,a.publish_dir,a.retention_days,a.cleanup_dry_run)
+                cleanup_remote(a.publish_host,a.publish_dir,a.retention_days,a.cleanup_dry_run,
+                               protected_stores=a.protected_stores)
             except Exception as exc:
                 published_errors.append(('remote_cleanup', str(exc)))
                 logging.error('Remote retention cleanup failed: %s', exc)
@@ -1988,7 +2031,7 @@ def main(argv=None):
     if not a.no_local_cleanup:
         try:
             cleanup_local(out, work, a.retention_days, a.cleanup_dry_run,
-                          logs_dir=a.logs_dir)
+                          logs_dir=a.logs_dir, protected_stores=a.protected_stores)
         except Exception as exc:
             published_errors.append(('local_cleanup', str(exc)))
             logging.error('WCOSS2 retention cleanup failed: %s', exc)

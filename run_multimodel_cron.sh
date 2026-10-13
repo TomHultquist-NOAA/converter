@@ -63,7 +63,8 @@ if [[ "${CHECK_ENV_ONLY:-0}" == 1 ]]; then
   exit 0
 fi
 WORKERS="${WORKERS:-8}"
-RETENTION_DAYS="${RETENTION_DAYS:-7}"  # Same age limit on WCOSS2 and RZDM
+RETENTION_DAYS="${RETENTION_DAYS:-14}"  # Same age limit on WCOSS2 and RZDM
+PROTECTED_CYCLES_FILE="${PROTECTED_CYCLES_FILE:-$BASE_DIR/protected_cycles.json}" # Copy .example.json once; never overwrite your list
 CYCLE_LAG_HOURS="${CYCLE_LAG_HOURS:-3.5}"  # New cycle eligible 210 min after initialization
 CATCHUP_CYCLES="${CATCHUP_CYCLES:-1}" # 0=current only; 1=current+previous 6h cycle
 # Run verification EVERY UTC hour; models only at 04/10/16/22 UTC.
@@ -106,7 +107,7 @@ cd "$BASE_DIR"
 FAILED=0
 EXTRA_COMMON=(
   --wgrib2 "$WGRIB2_BIN" --output-root "$OUTPUT_ROOT" --work-root "$WORK_ROOT"
-  --retention-days "$RETENTION_DAYS" --publish-host "$PUBLISH_HOST" --publish-dir "$PUBLISH_DIR"
+  --retention-days "$RETENTION_DAYS" --protected-cycles-file "$PROTECTED_CYCLES_FILE" --publish-host "$PUBLISH_HOST" --publish-dir "$PUBLISH_DIR"
 )
 if [[ "$NO_PUBLISH" == 1 ]]; then EXTRA_COMMON+=(--no-publish); fi
 if [[ "$VERIFY_ENABLED" == 1 && "$MODELS_ONLY" != 1 ]]; then
@@ -166,7 +167,7 @@ for choice in "${CYCLES[@]}"; do
     --date "$DATE" --cycle "$CYCLE" \
     --models "$MODELS" --workers "$WORKERS" \
     --output-root "$OUTPUT_ROOT" --work-root "$WORK_ROOT" \
-    --retention-days "$RETENTION_DAYS" --logs-dir "$BASE_DIR/logs" \
+    --retention-days "$RETENTION_DAYS" --protected-cycles-file "$PROTECTED_CYCLES_FILE" --logs-dir "$BASE_DIR/logs" \
     --publish-host "$PUBLISH_HOST" --publish-dir "$PUBLISH_DIR" \
     "${EXTRA[@]}" || FAILED=1
 done

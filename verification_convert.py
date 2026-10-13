@@ -219,9 +219,11 @@ def process_manifest(manifest,staging,outroot,wgrib2,level,stride,force=False,in
  finally:
   if tmp.exists():shutil.rmtree(tmp)
 
-def prune(outroot,days,now=None):
+def prune(outroot,days,now=None,analysis_rules=()):
+ from retention_policy import protects_analysis
  now=now or datetime.now(UTC);cutoff=now-timedelta(days=days);removed=0
  for folder in (outroot/'analysis').glob('analysis_*.zarr'):
+  if folder.is_symlink() or not folder.is_dir() or protects_analysis(folder.name,analysis_rules):continue
   try:
    meta=json.loads((folder/'.conversion.json').read_text())
    t=datetime.fromisoformat(meta['valid_time'].replace('Z','+00:00'))
@@ -257,7 +259,8 @@ def main(argv=None):
  p.add_argument('--output-root',required=True,help='Published-data staging root (contains analysis/ and catalog_analysis.json)')
  p.add_argument('--wgrib2',default=shutil.which('wgrib2'))
  p.add_argument('--lookback-hours',type=int,default=14)
- p.add_argument('--retention-days',type=int,default=7)
+ p.add_argument('--retention-days',type=int,default=14)
+ p.add_argument('--protected-cycles-file',type=Path,default=Path(__file__).with_name('protected_cycles.json'))
  p.add_argument('--mrms-stride',type=int,default=1,help='MRMS grid sampling stride (default 1: retain every native grid point; higher values opt-in downsampling)')
  p.add_argument('--compression-level',type=int,default=3)
  p.add_argument('--force',action='store_true');p.add_argument('--inspect-grid',action='store_true')
@@ -268,6 +271,8 @@ def main(argv=None):
  if not 1<=a.mrms_stride<=16:p.error('--mrms-stride must be 1-16')
  if not 0<=a.compression_level<=9:p.error('compression-level must be 0-9')
  if not 1<=a.retention_days<=30:p.error('retention-days must be 1-30')
+ from retention_policy import load_policy
+ policy=load_policy(a.protected_cycles_file)
  stage=Path(a.root).expanduser().resolve();out=Path(a.output_root).expanduser().resolve();out.mkdir(parents=True,exist_ok=True)
  now=datetime.now(UTC);cutoff=now-timedelta(hours=a.lookback_hours)
  counts={'converted':0,'already':0,'inspected':0,'failed':0}
@@ -282,7 +287,7 @@ def main(argv=None):
    except Exception as exc:
     LOG.exception('FAILED %s: %s',path,exc);counts['failed']+=1
  if not a.inspect_grid:
-  removed=prune(out,a.retention_days);total=build_catalog(out)
+  removed=prune(out,a.retention_days,analysis_rules=policy.analysis_rules);total=build_catalog(out)
   LOG.info('SUMMARY %s, pruned=%d, catalog datasets=%d',counts,removed,total)
  else:LOG.info('GRID CHECK SUMMARY %s',counts)
  return 1 if counts['failed'] else 0

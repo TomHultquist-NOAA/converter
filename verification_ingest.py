@@ -255,25 +255,43 @@ def process_job(client,wgrib2,root,t,job,config,now,plan=False,force=False,keep_
         if not keep_raw:
             raw.unlink(missing_ok=True);tmpgz.unlink(missing_ok=True)
 
-def cleanup(root,now,days):
-    cutoff=now-dt.timedelta(days=days)
-    removed=0
-    for source in ('rap_surface','rap_pressure','urma','rtma','mrms_refc','mrms_prate','mrms_apcp'):
-        area=root/source
-        if not area.exists():continue
+def cleanup(root, now, days, analysis_rules=()):
+    """Expire old staging day folders, preserving protected analysis valid hours.
+
+    Unknown filenames are never removed as a side effect of a partial-day prune.
+    """
+    from retention_policy import protects_analysis
+    cutoff = now - dt.timedelta(days=days)
+    removed = 0
+    for source in ('rap_surface', 'rap_pressure', 'urma', 'rtma',
+                   'mrms_refc', 'mrms_prate', 'mrms_apcp'):
+        area = root/source
+        if not area.is_dir() or area.is_symlink(): continue
         for daydir in area.iterdir():
-            if not daydir.is_dir() or not re.fullmatch(r'\d{8}',daydir.name):continue
-            day=dt.datetime.strptime(daydir.name,'%Y%m%d').replace(tzinfo=UTC)
-            # Retain day-folder containing a retained hour. Full-day pruning is
-            # slightly conservative but never deletes data inside 7-day window.
-            if day+dt.timedelta(days=1)>cutoff:continue
-            if daydir.is_symlink(): continue
-            shutil.rmtree(daydir);removed+=1
+            if not daydir.is_dir() or daydir.is_symlink() or not re.fullmatch(r'\d{8}', daydir.name): continue
+            day = dt.datetime.strptime(daydir.name, '%Y%m%d').replace(tzinfo=UTC)
+            if day + dt.timedelta(days=1) > cutoff: continue
+            # Never delete a protected hour's original manifest or staged GRIB.
+            # A cycle-protection interval may cover only part of a UTC day.
+            keep_any = any(protects_analysis(f'analysis_{source}_{daydir.name}{hour:02d}.zarr', analysis_rules)
+                           for hour in range(24))
+            if not keep_any:
+                shutil.rmtree(daydir); removed += 1
+                continue
+            for child in daydir.iterdir():
+                if child.is_symlink() or not child.is_file(): continue
+                m = re.fullmatch(re.escape(source) + r'_(\d{10})\.(?:json|grib2|source\.grib2|source\.grib2\.gz)', child.name)
+                if m and not protects_analysis(f'analysis_{source}_{m.group(1)}.zarr', analysis_rules):
+                    child.unlink(); removed += 1
+            if not any(daydir.iterdir()):
+                daydir.rmdir()
     return removed
+
 
 def main(argv=None):
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--config',type=Path,default=Path(__file__).with_name('verification_sources.json'))
+    ap.add_argument('--protected-cycles-file',type=Path,default=Path(__file__).with_name('protected_cycles.json'))
     ap.add_argument('--root',type=Path,required=True,help='Local staging root; outside your published Zarr tree')
     ap.add_argument('--wgrib2',default=os.getenv('WGRIB2') or shutil.which('wgrib2'))
     ap.add_argument('--lookback-hours',type=int,default=14,help='Revisit recent valid hours; catches delayed RAP/URMA')
@@ -287,6 +305,8 @@ def main(argv=None):
     ap.add_argument('--verbose',action='store_true')
     args=ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
+    from retention_policy import load_policy
+    policy=load_policy(args.protected_cycles_file)
     conf=load_json(args.config)
     if conf.get('schema')!='omd-evu-verification-source-map-1':ap.error('Configuration schema mismatch')
     if not args.dry_run and not args.wgrib2:ap.error('wgrib2 not found; pass --wgrib2 /absolute/path/to/wgrib2')
@@ -301,7 +321,7 @@ def main(argv=None):
             if args.source!='all' and (job[2].split('_',1)[0]!=args.source):continue
             result=process_job(client,args.wgrib2,root,t,job,conf,now,args.dry_run,args.force,args.keep_raw)
             summ[result]+=1
-    removed=0 if args.dry_run or args.no_cleanup else cleanup(root,now,conf['retention_days'])
+    removed=0 if args.dry_run or args.no_cleanup else cleanup(root,now,conf['retention_days'],policy.analysis_rules)
     LOG.info('SUMMARY %s | removed_old_daydirs=%d',summ,removed)
     # Pending data is normal; the next hourly pass will retry.
     return 0

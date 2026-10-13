@@ -1,6 +1,6 @@
 {
   "schema": "omd-evu-verification-source-map-1",
-  "retention_days": 7,
+  "retention_days": 14,
   "mrms_hourly_sample_tolerance_minutes": 8,
   "source_delays_minutes": {
     "rap": 65,
