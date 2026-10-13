@@ -870,7 +870,7 @@ MODELS = ('rrfs', 'refs_mean', 'refs_m001', 'refs_m002', 'refs_m003', 'refs_m004
 PRODUCTS = {
     'rrfs': ('2dfld', 'prslev'),
     'refs_mean': ('mean',),
-    'refs_member': ('2dfldnomads',),
+    'refs_member': ('2dfldnomads', 'prslevnomads'),
     'hrrr': ('wrfsfc', 'wrfprs'),
 }
 # Fields retain the units expected by viewer.js, before any browser conversion.
@@ -912,7 +912,7 @@ def file_urls(model, date, cycle, fhr, product):
     elif model.startswith('refs_m'):
         member = model.split('_', 1)[1]
         prefix = f'{SOURCE_ROOT}/rrfsens.{date}/{cycle}/{member}/'
-        fname = f'rrfs.t{cycle}z.{member}.2dfldnomads.3km.f{fhr:03d}.conus.grib2'
+        fname = f'rrfs.t{cycle}z.{member}.{product}.3km.f{fhr:03d}.conus.grib2'
     elif model == 'hrrr':
         prefix = f'{HRRR_ROOT}/hrrr.{date}/conus/'
         fname = f'hrrr.t{cycle}z.{product}f{fhr:02d}.grib2'
@@ -1068,7 +1068,8 @@ def check_grid(wgrib2, path):
 
 def process_job(args):
     """Runs in a child process. Writes only hour-unique files; no shared metadata."""
-    model, date, cycle, fhr, store_str, work_str, wgrib2, level, timeout, retries, insecure, keep_grib, strict = args
+    model, date, cycle, fhr, store_str, work_str, wgrib2, level, timeout, retries, insecure, keep_grib, strict = args[:13]
+    repair_fields = tuple(args[13]) if len(args) > 13 and args[13] else None
     store = Path(store_str)
     # Cycle-scoped temporary GRIB directory: safe to expire by init time.
     work = Path(work_str) / model / f'{date}_{cycle}' / f'f{fhr:03d}'
@@ -1085,10 +1086,12 @@ def process_job(args):
     try:
         # Remove stale chunks from a previously interrupted attempt at THIS
         # hour only; other workers own other hour numbers.
-        for name in tuple(FIELDS) + ('ptype',):
-            (store / name / f'{fhr}.0.0').unlink(missing_ok=True)
-            (store / '.accum_intervals' / name / f'{fhr}.zlib').unlink(missing_ok=True)
-        for product in PRODUCTS[family(model)]:
+        for name in (repair_fields if repair_fields is not None else tuple(FIELDS) + ('ptype',)):
+            # Do not touch any already present surface/derived chunks in a repair.
+            if repair_fields is None:
+                (store / name / f'{fhr}.0.0').unlink(missing_ok=True)
+                (store / '.accum_intervals' / name / f'{fhr}.zlib').unlink(missing_ok=True)
+        for product in (('prslevnomads',) if repair_fields else PRODUCTS[family(model)]):
             url, idxurl = file_urls(model, date, cycle, fhr, product)
             try:
                 # The index is authoritative for which records actually exist.
@@ -1105,6 +1108,8 @@ def process_job(args):
         # Across all products, select at most one record per logical field.
         # REFS mean categorical values are not deterministic weather types.
         for name in FIELDS:
+            if repair_fields is not None and name not in repair_fields:
+                continue
             if name == 'wspd10' or (model == 'refs_mean' and name in core.PTYPE_INPUTS):
                 continue
             for product, (_, _, rows) in inventory.items():
@@ -1179,7 +1184,8 @@ def process_job(args):
                     for name,(product,rec,interval) in chosen.items()}
         return {'model':model,'fhr':fhr,'fields':sorted(chosen),'selections':selections,
                 'pending':pending,'products':product_info,'status':'complete',
-                'missing_products':missing_products,'count':count}
+                'missing_products': missing_products,'count':count,
+                'repair_only': bool(repair_fields)}
     except Exception as exc:
         return {'model':model,'fhr':fhr,'status':'failed','error':str(exc),
                 'fields':sorted(chosen),'pending':pending}
@@ -1305,7 +1311,7 @@ def scan_stores(output_root, retention_days=None, as_of=None):
     return written
 
 
-def publish_one(store, catalog, work_root, host, remote_dir, keep_archive=False):
+def publish_one(store, catalog, work_root, host, remote_dir, keep_archive=False, store_arcname=None):
     """Uncompressed TAR: Zarr chunks are already zlib-compressed.
 
     Publish a model's catalog LAST. Unique archives per cycle prevent collision.
@@ -1328,9 +1334,17 @@ def publish_one(store, catalog, work_root, host, remote_dir, keep_archive=False)
                     return None
                 if not (t.isfile() or t.isdir()):
                     raise RuntimeError('Refusing non-regular file in published Zarr: '+t.name)
+                # Analysis stores originate in tempfile.mkdtemp(), which has
+                # mode 0700 by default.  Without normalizing TAR entry modes,
+                # Apache cannot traverse the published .zarr directory and
+                # browser chunk GETs fail with HTTP 403.  Apply only to web
+                # analysis artifacts, not private WCOSS2 work directories.
+                if store_arcname and store_arcname.startswith('analysis/'):
+                    t.mode = 0o755 if t.isdir() else 0o644
                 return t
-            f.add(store, arcname=store.name,recursive=True,filter=safe_filter)
-            f.add(catalog,arcname=catalog.name,recursive=False,filter=safe_filter)
+            f.add(store, arcname=store_arcname or store.name,recursive=True,filter=safe_filter)
+            if catalog is not None:
+                f.add(catalog,arcname=catalog.name,recursive=False,filter=safe_filter)
         os.replace(tmp,archive)
         remote_archive=f'.{archive.name}.incoming'
         subprocess.run(['ssh',host,'mkdir -p '+shlex.quote(remote_dir)],check=True)
@@ -1339,7 +1353,7 @@ def publish_one(store, catalog, work_root, host, remote_dir, keep_archive=False)
                  f'tar -xf {shlex.quote(remote_archive)}; '
                  f'rm -f {shlex.quote(remote_archive)}')
         subprocess.run(['ssh',host,command],check=True)
-        logging.info('Published %s and %s to %s',store.name,catalog.name,host)
+        logging.info('Published %s%s to %s',store.name,(' and '+catalog.name) if catalog else '',host)
     finally:
         tmp.unlink(missing_ok=True)
         if archive.is_file() and not keep_archive:
@@ -1675,6 +1689,8 @@ def arguments(argv=None):
     p.add_argument('--insecure',action='store_true',help='Disable TLS verification for local CA problems only')
     p.add_argument('--keep-grib',action='store_true')
     p.add_argument('--overwrite-hours',action='store_true')
+    p.add_argument('--repair-refs-pressure',action='store_true',
+                   help='Safely add missing t925/t850/t700 REFS-member fields to already processed hours, retaining existing fields')
     p.add_argument('--strict-fields',action='store_true',help='Fail if an hour has no supported fields')
     p.add_argument('--no-publish',action='store_true',help='Do not SCP/SSH to RZDM')
     p.add_argument('--inventory-only',action='store_true',help='Inspect GRIB .idx files only; no downloads, Zarr output or publishing (default: first hour per model)')
@@ -1702,6 +1718,8 @@ def arguments(argv=None):
             a.hours=core.parse_hours(a.hours)
         if not 1<=a.workers<=20:
             raise ValueError('--workers must be 1-20')
+        if a.repair_refs_pressure and (a.overwrite_hours or a.inventory_only or a.catalog_only or a.publish_only):
+            raise ValueError('--repair-refs-pressure cannot be combined with overwrite/inventory/catalog/publish-only')
         if a.inventory_only and (a.catalog_only or a.publish_only or a.overwrite_hours):
             raise ValueError('--inventory-only cannot be combined with catalog-only, publish-only, or overwrite-hours')
         if a.publish_only and a.no_publish:
@@ -1799,6 +1817,8 @@ def main(argv=None):
     else:
         wgrib2=None
     for model in a.models:
+        if a.repair_refs_pressure and not model.startswith('refs_m'):
+            continue
         lo,hi=hour_bounds(model)
         hours=range(lo,hi+1) if a.hours is None else [h for h in a.hours if lo<=h<=hi]
         if not hours:
@@ -1817,14 +1837,26 @@ def main(argv=None):
             'model':model,'date':a.date,'cycle':a.cycle,'forecast_hours':{}}
         manifests[model]=manifest
         for h in hours:
-            if flags[h] and not a.overwrite_hours:
-                logging.info('%s F%03d already processed; skipping',model,h)
-                continue
-            if flags[h]:
-                flags[h]=0
-                write_processed(store,flags,a.compression_level)
+            repair_fields = None
+            if a.repair_refs_pressure:
+                # Only touch previously finished hours. Repair missing pressure
+                # chunks individually instead of reprocessing surface fields.
+                if not flags[h]:
+                    continue
+                repair_fields = tuple(name for name in ('t925','t850','t700')
+                                      if not (store/name/f'{h}.0.0').is_file())
+                if not repair_fields:
+                    continue
+            else:
+                if flags[h] and not a.overwrite_hours:
+                    logging.info('%s F%03d already processed; skipping',model,h)
+                    continue
+                if flags[h]:
+                    flags[h]=0
+                    write_processed(store,flags,a.compression_level)
             jobs.append((model,a.date,a.cycle,h,str(store),str(work),wgrib2,
-                         a.compression_level,a.timeout,a.retries,a.insecure,a.keep_grib,a.strict_fields))
+                         a.compression_level,a.timeout,a.retries,a.insecure,a.keep_grib,a.strict_fields,
+                         repair_fields))
     failed=[]
     unavailable=[]
     incomplete_products=[]
@@ -1845,7 +1877,17 @@ def main(argv=None):
                     flags=processed[model]
                     flags[h]=1
                     write_processed(stores[model],flags,a.compression_level)
-                    manifests[model]['forecast_hours'][f'{h:03d}']=result
+                    if result.get('repair_only'):
+                        previous = manifests[model]['forecast_hours'].get(f'{h:03d}',{})
+                        combined = dict(previous)
+                        combined['status']='complete'
+                        combined['fields']=sorted(set(previous.get('fields',[])) | set(result['fields']))
+                        for key in ('selections','products'):
+                            combined[key]={**previous.get(key,{}),**result.get(key,{})}
+                        combined['repair_pressure_added']=result['fields']
+                        manifests[model]['forecast_hours'][f'{h:03d}']=combined
+                    else:
+                        manifests[model]['forecast_hours'][f'{h:03d}']=result
                     core.json_write(manifest_paths[model],manifests[model])
                     missing = result.get('missing_products', {})
                     if missing:
@@ -1934,4 +1976,11 @@ def main(argv=None):
 
 
 if __name__=='__main__':
-    main()
+    if '--verification-only' in sys.argv:
+        from verification_pipeline import main as run_verification
+        run_verification([x for x in sys.argv[1:] if x!='--verification-only'],
+                         publish_store=publish_one, validate_publisher=validate_publisher,
+                         default_publish_host=core.DEFAULT_PUBLISH_HOST,
+                         default_publish_dir=core.DEFAULT_PUBLISH_DIR)
+    else:
+        main()

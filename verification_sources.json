@@ -1,0 +1,136 @@
+{
+  "schema": "omd-evu-verification-source-map-1",
+  "retention_days": 7,
+  "mrms_hourly_sample_tolerance_minutes": 8,
+  "source_delays_minutes": {
+    "rap": 120,
+    "urma": 450,
+    "mrms_refc": 25,
+    "mrms_prate": 25,
+    "mrms_apcp": 90
+  },
+  "field_sources": {
+    "ptype": null,
+    "refc": "mrms_refc",
+    "csnow": null,
+    "cicep": null,
+    "cfrzr": null,
+    "crain": null,
+    "t2m": "urma",
+    "dpt2m": "urma",
+    "rh2m": "urma",
+    "prate": "mrms_prate",
+    "apcp": "mrms_apcp",
+    "frozr": null,
+    "frzr": null,
+    "tsnowp": null,
+    "asnow": null,
+    "cpofp": null,
+    "snowc": "rap",
+    "sden": null,
+    "weasd": "rap",
+    "snod": "rap",
+    "t925": "rap",
+    "t850": "rap",
+    "t700": "rap",
+    "wspd10": "urma",
+    "gust10": "urma"
+  },
+  "fields": {
+    "urma": {
+      "t2m": [
+        "TMP",
+        "2 m above ground"
+      ],
+      "dpt2m": [
+        "DPT",
+        "2 m above ground"
+      ],
+      "u10": [
+        "UGRD",
+        "10 m above ground"
+      ],
+      "v10": [
+        "VGRD",
+        "10 m above ground"
+      ],
+      "gust10": [
+        "GUST",
+        "10 m above ground"
+      ],
+      "wspd10": [
+        "WIND",
+        "10 m above ground"
+      ]
+    },
+    "rap_surface": {
+      "weasd": [
+        "WEASD",
+        "surface"
+      ],
+      "snod": [
+        "SNOD",
+        "surface"
+      ]
+    },
+    "rap_pressure": {
+      "t925": [
+        "TMP",
+        "925 mb"
+      ],
+      "t850": [
+        "TMP",
+        "850 mb"
+      ],
+      "t700": [
+        "TMP",
+        "700 mb"
+      ]
+    },
+    "mrms_refc": {
+      "refc": [
+        null,
+        null
+      ]
+    },
+    "mrms_prate": {
+      "prate": [
+        null,
+        null
+      ]
+    },
+    "mrms_apcp": {
+      "apcp": [
+        null,
+        null
+      ]
+    }
+  },
+  "mrms_products": {
+    "mrms_refc": "MergedReflectivityQCComposite_00.50",
+    "mrms_prate": "PrecipRate_00.00",
+    "mrms_apcp": "MultiSensor_QPE_01H_Pass1_00.00"
+  },
+  "derived_at_zarr_stage": {
+    "rh2m": {
+      "source": "urma",
+      "inputs": [
+        "t2m",
+        "dpt2m"
+      ],
+      "method": "relative_humidity_from_temperature_and_dewpoint",
+      "units": "percent",
+      "note": "Derived from URMA T and Td (K); choose saturation convention explicitly at Zarr conversion."
+    },
+    "snowc": {
+      "source": "rap_surface",
+      "inputs": [
+        "snod"
+      ],
+      "method": "binary_snow_presence_from_depth",
+      "threshold_m": 0.01,
+      "units": "binary 0/1",
+      "note": "Provisional snow-presence proxy, not fractional snow-cover percentage. Preserve this distinction in plot labels."
+    }
+  }
+}

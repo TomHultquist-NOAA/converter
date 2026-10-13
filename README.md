@@ -1,221 +1,136 @@
-# OMD EVU Multi-Source GRIB2-to-Zarr Processor
+# OMD EVU Unified Model and Verification Converter
 
-WCOSS2 processing and publishing workflow for the **Office of Modeling and Development (OMD), Evaluation and Verification Unit (EVU)** model viewer.
+**Version 6.3.2 — WCOSS2 operational source**
 
-The processor selects meteorological fields from NOAA GRIB2 inventories, downloads only needed byte ranges, decodes them with `wgrib2`, creates browser-compatible **Zarr v2** stores, and publishes completed datasets and model catalogs to RZDM. It supports concurrent forecast-hour workers, incremental resumption, automated six-hourly operation, and configurable retention on both servers.
+Downloads operational forecast and verification GRIB2 products, converts selected fields to browser-readable Zarr v2, generates catalogs, and publishes the results to the OMD EVU Model Viewer web server. The pipeline uses Python 3.10+ (standard library only) and an existing `wgrib2` executable; it does not require installing packages on WCOSS2.
 
-**Release:** Version 5.1 (unified eight-source defaults; clean standalone three-file edition). The Python processor includes the reusable RRFS decoding/Zarr helpers internally, so the older `rrfs_to_zarr_wcoss2_auto_publish.py` is **not required by this multi-source script**.
+**One hourly cron job** handles both workflows: RAP, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **7-day retention** policy. A shared `flock` lock prevents concurrent cron runs.
 
-## Package contents
+## Repository contents
 
-| File | Purpose |
-| --- | --- |
-| `multi_model_to_zarr_wcoss2.py` | Main processor, Zarr conversion, publishing and retention |
-| `run_multimodel_cron.sh` | Automatic cycle selection, catch-up, locking and logging |
-| `converter_cron_env.sh` | Minimal WCOSS2 module/environment setup for cron |
-| `README.md` | Deployment, usage and maintenance instructions |
-
-No test scripts or development artifacts are included in the deployment archive.
-
-## Supported sources
-
-| Source ID | Input | Forecast hours |
+| File | Role | Needed? |
 | --- | --- | --- |
-| `rrfs` | Deterministic RRFS | F000–F084 |
-| `refs_mean` | REFS ensemble mean | F001–F060 |
-| `refs_m001` through `refs_m005` | Five REFS ensemble members | F000–F060 |
-| `hrrr` | HRRR surface and pressure products | F000–F048 |
+| `multi_model_to_zarr_wcoss2.py` | Main model and verification entry point; catalogs, publishing, retention | **Required** |
+| `run_multimodel_cron.sh` | Unified hourly cron launcher, locking, model-cycle selection | **Required for cron** |
+| `converter_cron_env.sh` | Loads a captured WCOSS2 runtime in cron | **Required for cron** |
+| `capture_converter_runtime.sh` | Creates the local runtime configuration from a working interactive shell | **Required for initial setup / changes** |
+| `verification_pipeline.py` | Hourly verification orchestration and publishing decisions | **Required** |
+| `verification_ingest.py` | Download and extraction of RAP, URMA, MRMS GRIB2 | **Required** |
+| `verification_convert.py` | Zarr conversion and derived verification fields | **Required** |
+| `verification_sources.json` | Analysis field mappings and latency settings | **Required** |
+| `repair_analysis_access.py` | Optional, read-only-by-default fix for previously published Analysis Zarr permissions | **Maintenance utility** |
+| `.gitignore` | Excludes generated data, runtime paths and operational files from Git | **Recommended** |
+| `README.md` | Setup and operations documentation | **Recommended** |
 
-The cron wrapper now defaults to **all eight forecast sources**, including RRFS: `MODELS="${MODELS:-all}"`. This matches the current nine-panel viewer. **Disable the old standalone RRFS conversion job** before using the unified processor against the same store.
+Keep these files together in the processing directory so Python can import the verification helper modules. The permissions-repair utility is not run by cron and can be left out of a minimal **deployment**, but is useful to keep in the source repository for future recovery.
 
-Fields include the existing surface and pressure variables, **10-m U/V wind components**, **derived 10-m wind speed**, **gust**, and HRRR **FROZR** (frozen rain) and **FRZR** (freezing rain). Input `.idx` inventories determine which fields are actually available for each product and forecast hour; missing fields are not fabricated. Accumulation fields are handled to avoid treating incremental precipitation as forecast-total precipitation.
+## Models and verification sources
 
-## Requirements
+| Dataset | Available forecast / analysis hours |
+| --- | --- |
+| RRFS | F000–F084 |
+| REFS mean | F001–F060 |
+| REFS members m001–m005 | F000–F060 |
+| HRRR | F000–F048 |
+| MRMS | Hourly verification: composite reflectivity, precipitation rate, one-hour QPE |
+| URMA | Hourly verification: 2-m temperature/dewpoint, 10-m wind/gust, derived 2-m RH |
+| RAP | Hourly F000 analysis: snow depth, SWE, 925-/850-/700-hPa temperature, derived snow-presence mask |
 
-- WCOSS2 Python 3.8+ with the **standard library only** (no pip/conda/Numpy/xarray/Zarr installation needed).
-- `wgrib2` executable and sufficient CPU, memory, scratch space and I/O permissions.
-- `bash`, `flock`, `ssh`, `scp`, `tar`, and noninteractive SSH authorization to RZDM for unattended publishing.
-- On RZDM: write access to the destination directory and `python3` for remote retention. The remote cleanup code is compatible with Python 3.6.
+MRMS conversion uses **native stride 1** (no spatial decimation). RAP snow presence is a binary proxy derived from depth, *not* fractional snow-cover percentage. Verification is indexed by **valid UTC hour**, with source-specific publication delays set in `verification_sources.json`. Data not yet published by a source are retried during subsequent hourly runs; no older hour is substituted.
 
-**Important:** Confirm your WCOSS2 compute and cron scheduling policies before running high worker counts. Although `--workers` supports 1–20, start with about 8 and adjust for your resource allocation.
+Output includes model-specific catalogs (`catalog_rrfs.json`, `catalog_refs_m001.json`, etc.) and `catalog_analysis.json` for the viewer's Analysis panel. The existing top-level `catalog.json` is not overwritten by the model publisher.
 
-## Installation and configured paths
+## Initial setup on WCOSS2
 
-Extract the files into:
+Install or update the source files in the existing `zarr_processing` directory. Preserve your existing `zarr/`, `work/`, `logs/`, SSH setup, and any local configuration. The included cron wrapper has **site-specific directory and RZDM destination defaults**; review them when deploying anywhere other than the established WCOSS2 installation.
 
-```text
-/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/
-```
-
-The cron wrapper is already configured with these paths:
-
-```bash
-BASE_DIR="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing"
-OUTPUT_ROOT="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr"
-WORK_ROOT="/lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work"
-PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 || true)}"
-WGRIB2_BIN="${WGRIB2_BIN:-$(command -v wgrib2 || true)}"
-```
-
-It also exports `OMP_NUM_THREADS=1`, `OMP_THREAD_LIMIT=1`, `MKL_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `NUMEXPR_NUM_THREADS=1` to prevent OpenMP thread exhaustion while multiple Python workers invoke `wgrib2`. The Python script applies the same settings when run directly.
-
-The default RZDM publish target is:
-
-```text
-thultquist@rzdm.ncep.noaa.gov:
-/home/people/emc/www/htdocs/users/verification_restricted/test/trh/dynamic_viewer/data
-```
-
-You can override it with `--publish-host` and `--publish-dir` when running the Python program manually.
-
-**Upgrade caution:** Wait until any active processing job completes before replacing the scripts. Retain existing `zarr/`, `work/`, and `logs/` directories, and preserve changes you made to the cron wrapper.
-
-## Checking field availability
-
-Query `.idx` inventories without downloading or processing GRIB data:
+From an **interactive shell with a known-working Python and wgrib2 environment**:
 
 ```bash
-python3 multi_model_to_zarr_wcoss2.py \
-  --date 20261009 --cycle 00 \
-  --models hrrr,refs_mean,refs_m001 \
-  --hours 1 --inventory-only
+cd /path/to/zarr_processing
+chmod 750 run_multimodel_cron.sh capture_converter_runtime.sh
+./capture_converter_runtime.sh
 ```
 
-This is useful for confirming HRRR FROZR/FRZR, 10-m wind fields, and source-specific field availability.
+This writes `converter_runtime_paths.sh` locally. **Do not commit or share it.** It captures executable/library paths for cron; the cron wrapper does not need to load WCOSS2 modules or source `.bashrc`. A clean `wgrib2 -version` response is accepted even if that particular command returns a nonzero status (as observed with WCOSS2 3.8.0).
 
-## Running manually
-
-Process or resume a known cycle (uses your existing local output/work directories):
+Test the environment without running any processing:
 
 ```bash
-python3 multi_model_to_zarr_wcoss2.py \
-  --date 20261009 --cycle 06 \
-  --models all \
-  --workers 8 \
-  --wgrib2 /apps/ops/prod/libs/intel/19.1.3.304/cray-mpich/8.1.4/wgrib2/3.8.0/bin/wgrib2 \
-  --output-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr \
-  --work-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work \
-  --retention-days 7
+env -i HOME="$HOME" PATH=/usr/bin:/bin CHECK_ENV_ONLY=1 \
+  /bin/bash ./run_multimodel_cron.sh
 ```
 
-To backfill a different run, change `--date` and `--cycle`. To process a subset, add `--hours 0-12` (the REFS mean naturally begins at F001). **Re-running skips completed forecast hours.** Add `--overwrite-hours` only when you explicitly need to replace already-completed data.
+Expected: `Cron runtime OK: Python=... ; wgrib2=...`.
 
-To rebuild/publish existing output without re-downloading GRIB, see `--catalog-only` and `--publish-only` in `python3 multi_model_to_zarr_wcoss2.py --help`.
+## Scheduling
 
-## Automatic six-hourly processing
-
-The cron wrapper accepts **no positional arguments**. It selects the latest eligible UTC cycle, retries the previous cycle, manages its own lock file, and writes timestamped logs under `BASE_DIR/logs/`.
-
-Run it manually first:
-
-```bash
-/bin/bash /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/run_multimodel_cron.sh
-```
-
-Recommended crontab (assuming the cron host uses UTC):
+Install **one** cron entry and remove any earlier four-times-daily entries for the same converter:
 
 ```cron
-SHELL=/bin/bash
-USERSHELL=/bin/bash
-MAILTO=""
-7 4,10,16,22 * * * /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/run_multimodel_cron.sh >> /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/cron_errors.log 2>&1
+0 * * * * /path/to/zarr_processing/run_multimodel_cron.sh >> /path/to/zarr_processing/cron_errors.log 2>&1
 ```
 
-Run `chmod 750 run_multimodel_cron.sh` after installing. The wrapper sources
-`converter_cron_env.sh` (not the complete `.bashrc`); it initializes the
-`module` command, loads compiler/MPI, `wgrib2/3.8.0` and `python/3.10.4`,
-then resolves executable paths from the loaded module environment.
-If your site's modules initialization file differs, set `MODULE_INIT_FILE`
-near the top of `converter_cron_env.sh` or in the crontab. Do not use
-`bash -l` or other login-shell workarounds.
+The wrapper uses UTC for its model-cycle checks and handles verification first. At 04/10/16/22 UTC it processes the newest eligible model initialization cycle and, by default, the preceding cycle (`CATCHUP_CYCLES=1`). An invocation that encounters an active shared lock skips rather than overlapping work. A full seven-day automatic model backfill is **not** implemented; recover older missed cycles explicitly as needed.
 
-The installed module versions follow the supplied interactive `.bashrc`, but
-may need adjustment for changes on WCOSS2. Test the environment independently:
+Common optional settings: `WORKERS=8`, `RETENTION_DAYS=7`, `CYCLE_LAG_HOURS=3.5`, `CATCHUP_CYCLES=1`, `VERIFY_LOOKBACK_HOURS=20`, `MRMS_STRIDE=1`, `MODELS=all`, `NO_PUBLISH=1` (test), `PUBLISH_HOST`, and `PUBLISH_DIR`.
+
+## Manual processing and recovery
+
+Run from the `zarr_processing` directory in your working WCOSS2 environment. Set `OMP_NUM_THREADS=1` and `OMP_THREAD_LIMIT=1` to avoid excessive OpenMP threading in wgrib2.
+
+**Verification download, conversion, and publishing (all sources):**
 
 ```bash
-cd /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing
-/bin/bash -c 'set -e; source ./converter_cron_env.sh; command -v python3; python3 --version; command -v wgrib2; wgrib2 -version'
+python3 multi_model_to_zarr_wcoss2.py --verification-only \
+  --output-root "$PWD/zarr" --work-root "$PWD/work" \
+  --lookback-hours 20 --mrms-stride 1
 ```
 
-Note: WCOSS2 guidance says that cron-launched heavy computation should be
-submitted to PBS; this version deliberately does not change execution mode.
+Add `--no-publish` to test locally without SCP transfer.
 
-
-The wrapper logs normal processing internally; `cron_errors.log` can capture unexpected startup output. If the host is not set to UTC, adapt the schedule accordingly.
-
-Key settings at the top of `run_multimodel_cron.sh`:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `WORKERS` | `8` | Parallel forecast-hour processes (1–20) |
-| `CYCLE_LAG_HOURS` | `3.5` | Initialization must be at least 3 h 30 min old before automatic selection |
-| `CATCHUP_CYCLES` | `1` | Revisit one earlier six-hour cycle (0–3 supported) |
-| `RETENTION_DAYS` | `7` | Keep cycles on both WCOSS2 and RZDM |
-| `MODELS` | `all` (all eight sources) | RRFS, REFS mean, REFS members 1–5, HRRR; can be narrowed to one or several sources |
-| `PYTHON_BIN`, `WGRIB2_BIN` | WCOSS2 values above | Executables; use absolute paths for cron where needed |
-
-The corresponding direct-Python auto mode is:
+**One model cycle (all models):**
 
 ```bash
 python3 multi_model_to_zarr_wcoss2.py \
-  --date auto --cycle auto --lag-hours 3.5 \
-  --models hrrr,refs_mean --workers 8 \
-  --output-root ./zarr --work-root ./work
+  --date YYYYMMDD --cycle 18 --models all --workers 4 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
 ```
 
-**Cycle selection:** With a 3.5-hour eligibility delay, 04:00, 10:00, 16:00, and 22:00 UTC choose respectively the 00, 06, 12, and 18 UTC model cycles. The delay does not limit explicitly specified historical cycles.
-
-## Data retention and safety
-
-`--retention-days 7` retains model cycles whose initialization times are within the last seven days on **both** WCOSS2 and RZDM. It compares initialization timestamps, **not file modification times**.
-
-Locally, recognized expired Zarr stores, manifests, summaries, dated scratch directories, optional retained publishing archives, and optionally named cron logs are removed. Remotely, only recognized expired model Zarr directories are removed; expired entries in recognized catalogs are pruned. Unrelated files, source code, symlinks, undated legacy scratch folders, and viewer assets are not targets.
-
-**Always preview deletion when first configuring or changing paths:**
+**Repair previously processed REFS member pressure-level temperatures:**
 
 ```bash
 python3 multi_model_to_zarr_wcoss2.py \
-  --date auto --cycle auto \
-  --output-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr \
-  --work-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work \
-  --retention-days 7 --cleanup-only --cleanup-dry-run
+  --date YYYYMMDD --cycle 12 \
+  --models refs_m001,refs_m002,refs_m003,refs_m004,refs_m005 \
+  --repair-refs-pressure --workers 4 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
 ```
 
-Use `--no-local-cleanup` or `--no-remote-cleanup` to disable one side. To change retention on scheduled runs, set `RETENTION_DAYS` in the wrapper. Historical backfills older than the retention window may be immediately excluded or deleted; increase retention before backfilling those dates.
+REFS pressure-level temperature uses the separate `prslevnomads` product. The repair adds missing `t925`, `t850`, and `t700` fields to previously processed member hours without overwriting unrelated fields. Omit `--no-publish` to transfer the repaired stores. Do not run a manual backfill simultaneously with cron; coordinate via the shared lock or temporarily disable cron.
 
-## RRFS and the current model viewer
-
-**Important for users upgrading from the seven-source cron wrapper:** earlier versions defaulted to processing only REFS members, REFS mean, and HRRR. Version 5.1 enables RRFS in the six-hourly workflow too. That is why `catalog_rrfs.json` and recent `rrfs_YYYYMMDD_CC00.zarr/` folders were previously absent even though the other seven sources were successful.
-
-The updated viewer (V7.18+) reads RRFS from **`data/catalog_rrfs.json`**, not the legacy **`data/catalog.json`**. The unified publisher creates and updates the former without deleting or overwriting the latter. Make sure you deploy both updated configurations and publish at least one RRFS cycle. Until RRFS has been processed for a selected cycle, that panel correctly displays *No matching cycle*.
-
-To backfill an existing initialization with **RRFS only** (the new script will skip completed forecast hours):
+**Retry publication of an already repaired model cycle:**
 
 ```bash
 python3 multi_model_to_zarr_wcoss2.py \
-  --date 20261009 --cycle 06 --models rrfs --workers 8 \
-  --wgrib2 /apps/ops/prod/libs/intel/19.1.3.304/cray-mpich/8.1.4/wgrib2/3.8.0/bin/wgrib2 \
-  --output-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/zarr \
-  --work-root /lfs/h2/emc/vpppg/noscrub/thomas.hultquist/zarr_processing/work \
-  --retention-days 7
+  --date YYYYMMDD --cycle 12 --models refs_m001 \
+  --publish-only --output-root "$PWD/zarr" --work-root "$PWD/work" \
+  --no-remote-cleanup --no-local-cleanup
 ```
 
-Change `--date` / `--cycle` for the backfill needed. The cron wrapper automatically revisits only the newest cycle and the configured number of previous cycles (`CATCHUP_CYCLES`, default 1), **not** all past seven days. Backfill older cycles explicitly if you want them in the viewer's full seven-day cycle list.
+Use this after an intermittent SCP/SSH publishing failure (including SSH exit status 255) rather than repeating downloads. Publication of a model store may retransmit its full Zarr archive.
 
-## Outputs and troubleshooting
+## Logs, access, and retention
 
-- Local stores: `OUTPUT_ROOT/MODEL_YYYYMMDD_CC00.zarr/`.
-- Model-specific catalogs: `catalog_rrfs.json`, `catalog_refs_mean.json`, `catalog_refs_m001.json`, etc.; these **do not overwrite** the legacy `catalog.json`.
-- Local run summaries: `run_summary_YYYYMMDD_CC.json`.
-- Logs: `BASE_DIR/logs/multisource_YYYYMMDD_HHMMSS.log`.
-- Completed hours are recorded so subsequent invocations can resume without reprocessing those hours.
+- Timestamped cron logs: `logs/multisource_YYYYMMDD_HHMMSS.log`; startup errors: `cron_errors.log`.
+- Verification datasets and catalogs publish beneath the configured RZDM `data/analysis/` tree and `data/catalog_analysis.json`.
+- The publisher sets web-readable permissions for new Analysis stores. If older stores return **HTTP 403**, run `python3 repair_analysis_access.py` to inspect, then `python3 repair_analysis_access.py --apply` only after checking the target host/path. This maintenance utility does not run automatically.
+- Local analysis publishing state (`zarr/.analysis_publish_state.json`) is deliberately excluded from Git. Do not delete it during normal operation.
+- The cleanup policy is seven days for local and remote datasets; confirm available disk space when processing full-resolution MRMS.
+- Live RAP, URMA, and MRMS conversion/publishing and Analysis display have been verified; the repaired REFS member temperatures have also been displayed. The cron environment check passed, but monitor unattended cron execution separately.
 
-**`wgrib2` aborts with OMP Error #34 / SIGABRT:** Verify all five OpenMP environment settings above are active, and reduce `WORKERS` if compute-node resources are limited.
+## GitHub hygiene
 
-**Files not yet available (HTTP 404):** The processor logs absent products/fields separately from genuine decoding or download failures. Later invocations can retry hours still unprocessed. If an hour was completed using only some products, use `--overwrite-hours` to revisit it after late products arrive.
+Commit the **source files, JSON configuration, `.gitignore`, and README only**. Keep generated Zarr stores, downloaded GRIB2, temporary archives, logs, processed manifests, and the captured WCOSS2 runtime outside Git. `.gitignore` protects *untracked* files; if any generated file was already committed, untrack it with `git rm --cached <path>` (do not delete your operational copy). Never commit SSH keys, tokens, or passwords.
 
-**Publishing or cleanup error:** Inspect the detailed log and `publish_errors` in the JSON run summary. Confirm SSH/SCP, remote write permissions, free space, and RZDM `python3`. A successful local conversion does not necessarily imply the dataset has reached RZDM; `--publish-only` can be used to republish existing stores.
-
-**No terminal output from cron wrapper:** It redirects normal output to its internal timestamped log, even when launched interactively. Use `tail -f` on the current file in `logs/` to watch progress.
-
-This deployment package intentionally omits automated test scripts; regression tests are run separately during development.
+The current scripts contain installation-specific filesystem paths, an SSH user, and a restricted-site publishing destination as operational defaults. They are **not credentials**, but they will be visible to anyone who can read the GitHub repository. Review those defaults and repository visibility before making this repository public.
