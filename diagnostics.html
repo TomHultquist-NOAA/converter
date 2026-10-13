@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OMD EVU — Adaptive Multi-Panel Rendering Diagnostics</title>
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Segoe UI,sans-serif}*{box-sizing:border-box}
+body{background:#0c1729;color:#e5eefb;margin:0;line-height:1.48}
+main{max-width:1400px;margin:auto;padding:25px 20px 60px}
+h1{font-size:clamp(1.45rem,3vw,2rem);margin:0 0 9px}h2{font-size:1.05rem;margin:0 0 10px}
+a{color:#9ad5ff}p{color:#b4c5d9;max-width:78ch}
+section{background:#122238;border:1px solid #284461;border-radius:13px;margin:16px 0;padding:17px}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:11px}.controls label{font-weight:600}button,select{font:inherit;padding:9px 13px;color:#ecf6ff;background:#1b3553;border:1px solid #446582;border-radius:8px;cursor:pointer}button.primary{background:#176493;border-color:#3eabd8}button:hover:not(:disabled){background:#285177}button:disabled{opacity:.45;cursor:default}
+#summary{font-weight:700;color:#d7f2ff}#log{white-space:pre-wrap;overflow:auto;max-height:350px;background:#091424;border:1px solid #273e58;border-radius:8px;padding:13px;font:12px/1.55 ui-monospace,Consolas,monospace}
+.pass{color:#98f0b5}.fail{color:#ffadac}.warn{color:#ffd08b}.info{color:#b7d9f7}
+#maps{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.test-card{min-width:0;background:#091828;border:1px solid #324a66;border-radius:10px;overflow:hidden}
+.test-card .heading{font-size:12px;font-weight:650;padding:7px 9px;display:flex;justify-content:space-between;gap:5px}
+.test-card .map{height:160px;background:#174065}
+.test-card .state{font-size:12px;padding:9px;overflow-wrap:anywhere;min-height:52px;color:#bad3ee}
+.test-card.ok{border-color:#2e8456}.test-card.bad{border-color:#a9444c}
+small{font-size:12px;color:#aebed3}
+</style>
+<script src="vendor/maplibre-gl-csp.js"></script><script src="vendor/autumnplot-gl.js"></script>
+</head>
+<body><main>
+<h1>OMD EVU — Rendering diagnostics</h1>
+<p>Checks the <strong>same independent MapLibre instances</strong> used by the multi-panel viewer. Choose a viewer-like test that initializes maps sequentially and retains them up to the configured limit, or a simultaneous stress test. An optional second test loads real model Zarr chunks and initializes autumnplot-gl GPU layers. Geographic overlays are excluded to isolate map, worker, data, and GPU problems.</p>
+<p><a href="index.html">← Return to model viewer</a></p>
+<section><h2>Test controls</h2>
+<div class="controls"><label for="count">Map panels</label><select id="count"><option>1</option><option>4</option><option value="8" selected>8 (current model maps)</option><option>9</option><option>16</option><option>20</option></select>
+<label for="testMode">Initialization mode</label><select id="testMode"><option value="adaptive" selected>Viewer-like (sequential, retain)</option><option value="staged">Staged (retain all maps)</option><option value="burst">All at once (stress test)</option></select>
+<button id="start" class="primary">1. Test map initialization</button><button id="plots" disabled>2. Test real Zarr + GPU layers</button>
+<button id="cleanup" disabled>Release all maps</button></div>
+<p><small>Viewer-like mode now uses the full configured maximum on phones as well as desktops (9 in the supplied config), initializing one map at a time; it recycles maps only when the configured cap is exceeded. Staged mode retains every map regardless of the viewer cap. All-at-once recreates the old high-pressure test. Loading is checked for up to 45 seconds on mobile and 30 seconds on desktop. Your nine-panel viewer has eight model maps and one Analysis placeholder, so the full nine-map stress test exceeds its normal live-map requirement.</small></p>
+<div id="summary" role="status" aria-live="polite">Ready to run checks.</div></section>
+<section><h2>Detailed results</h2><div id="log" role="log" aria-live="polite"></div></section>
+<section><h2>Live map instances</h2><div id="maps"></div></section>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const cells=[],maps=[],s=$('summary'),log=$('log');
+let verified=[],liveQueue=[],modeUsed='adaptive',activeCap=9;
+let config=null,running=false,epoch=0;
+function say(type,message){const e=document.createElement('div');e.className=type;e.textContent=type.toUpperCase()+' — '+message;log.append(e);log.scrollTop=log.scrollHeight;console[type==='fail'?'error':'log'](message);}
+function status(i,type,msg){const c=cells[i];if(!c)return;c.el.classList.toggle('bad',type==='fail');c.el.classList.toggle('ok',type==='pass');c.state.textContent=msg;}
+function deadline(promise,ms,name){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(name+' timed out after '+Math.round(ms/1000)+'s')),ms);})]).finally(()=>clearTimeout(timer));}
+async function getJson(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error(`${url}: HTTP ${r.status}`);return r.json();}
+async function staticChecks(){
+ try{const can=document.createElement('canvas');const gl=can.getContext('webgl2')||can.getContext('webgl');say(gl?'pass':'fail',gl?'WebGL '+gl.getParameter(gl.VERSION):'No WebGL context');gl?.getExtension('WEBGL_lose_context')?.loseContext();}catch(e){say('fail','WebGL: '+e.message);}
+ say(window.maplibregl?.Map?'pass':'fail','MapLibre CSP browser library');
+ say(window.apgl?.PlotLayer&&window.apgl?.RawScalarField?'pass':'fail','autumnplot-gl browser library');
+ try{const resp=await fetch('vendor/autumnplot-assets.json',{cache:'no-store'});if(!resp.ok){say('warn','Autumnplot worker manifest unavailable: HTTP '+resp.status);}
+ else{const manifest=await resp.json();const assets=manifest.worker_candidates||manifest.files?.filter(x=>x.endsWith('.js')&&x!=='autumnplot-gl.js')||[];
+ say(assets.length?'pass':'fail',assets.length+' autumnplot worker assets declared');
+ for(const n of assets){const r=await fetch('vendor/'+n,{method:'HEAD',cache:'no-store'});say(r.ok?'pass':'fail','Worker '+n+': HTTP '+r.status);}}
+ }catch(e){say('fail','Autumnplot worker check: '+e.message);}
+ try{const r=await fetch('vendor/maplibre-gl-csp-worker.js',{method:'HEAD',cache:'no-store'});say(r.ok?'pass':'fail','MapLibre CSP worker: HTTP '+r.status);}catch(e){say('fail','MapLibre worker: '+e.message);}
+ try{config=await getJson('config.json');say('pass','config.json loaded; '+(config.panels?.length||0)+' configured panels');}catch(e){say('warn','config.json not available: '+e.message);}
+}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function releaseMap(i,reason=''){
+ const m=maps[i];if(!m)return;
+ try{m.remove();}catch(e){console.warn('Map release:',e);}
+ maps[i]=null;liveQueue=liveQueue.filter(n=>n!==i);
+ if(reason&&verified[i])status(i,'pass',reason);
+}
+function release(){epoch++;for(let i=0;i<maps.length;i++)releaseMap(i);maps.length=0;cells.length=0;verified=[];liveQueue=[];$('maps').replaceChildren();$('plots').disabled=true;$('cleanup').disabled=true;}
+function liveCount(){return maps.filter(Boolean).length;}
+function getActiveCap(mode,n){
+ if(mode!=='adaptive')return n;
+ const setting=Number(config?.display?.maxActiveMaps)||9;
+ return Math.max(1,Math.min(20,setting,n));
+}
+function recycleOne(){
+ const oldest=liveQueue[0];if(oldest===undefined)return;
+ releaseMap(oldest,'Passed; WebGL resources released for the next panel');
+ say('info',`Panel ${oldest+1}: passed; map released to stay within the ${activeCap}-map live limit`);
+}
+async function readyMap(m,i,ms){
+ // A loaded style is sufficient to start plotting even if the 'load' event
+ // is delayed behind other WebGL work. This matches the production viewer.
+ return new Promise((resolve,reject)=>{
+  let settled=false,poll=null,timer=null,contextLost=false;
+  const started=performance.now(),canvas=m.getCanvas?.();
+  const finish=(err)=>{
+   if(settled)return;settled=true;clearInterval(poll);clearTimeout(timer);
+   m.off?.('load',onLoad);canvas?.removeEventListener?.('webglcontextlost',onLost);
+   err?reject(err):resolve(Math.round(performance.now()-started));
+  };
+  const onLoad=()=>finish(null);
+  const onLost=e=>{e.preventDefault?.();contextLost=true;finish(Error(`Panel ${i+1}: WebGL context was lost`));};
+  m.on('load',onLoad);canvas?.addEventListener?.('webglcontextlost',onLost);
+  const probe=()=>{
+   if(settled)return;
+   try{if(m.loaded?.()||m.isStyleLoaded?.())finish(null);}
+   catch(e){console.debug('Style readiness probe:',e);}
+  };
+  poll=setInterval(probe,500);
+  timer=setTimeout(()=>finish(Error(`Panel ${i+1} did not become ready after ${Math.round(ms/1000)}s (load event and style readiness checked; ${contextLost?'context lost':'possible GPU/worker scheduling delay'})`)),ms);
+  probe();
+ });
+}
+async function initializeOne(i,run,{retry=false}={}){
+ if(epoch!==run)return false;
+ if(maps[i])return true;
+ const c=cells[i];if(!c)return false;
+ status(i,'info','Starting MapLibre/WebGL…');
+ let m;
+ try{
+  m=new maplibregl.Map({container:c.map,style:{version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#19486e'}}]},center:[-97,39],zoom:2,attributionControl:false,interactive:false});
+  maps[i]=m;liveQueue.push(i);
+  const errors=[];
+  m.on('error',e=>{const msg=e.error?.message||String(e.error||e);errors.push(msg);say('warn',`Panel ${i+1} MapLibre event: ${msg}`);});
+  const duration=await readyMap(m,i,innerWidth<=800?45000:30000);
+  if(epoch!==run)return false;
+  verified[i]=true;
+  status(i,'pass',`MapLibre ready in ${(duration/1000).toFixed(1)}s${retry?' (after retry)':''}`);
+  if(errors.length)say('warn',`Panel ${i+1} reported ${errors.length} nonfatal map event(s); style nevertheless became ready`);
+  return true;
+ }catch(e){
+  const detail=String(e?.message||e);
+  releaseMap(i);
+  if(epoch!==run)return false;
+  if(!retry&&modeUsed==='adaptive'&&/did not become ready/i.test(detail)){
+   say('warn',`Panel ${i+1}: timed out; retrying once after a short resource recovery pause`);
+   await sleep(650);
+   return initializeOne(i,run,{retry:true});
+  }
+  status(i,'fail',detail);say('fail',`Panel ${i+1}: ${detail}`);return false;
+ }
+}
+async function testMaps(){
+ if(running)return;running=true;$('start').disabled=true;$('count').disabled=true;$('testMode').disabled=true;release();log.replaceChildren();s.textContent='Checking libraries and MapLibre startup…';const run=epoch;
+ try{
+  await staticChecks();if(!window.maplibregl?.Map)throw Error('MapLibre library not loaded');
+  maplibregl.setWorkerUrl(new URL('vendor/maplibre-gl-csp-worker.js',document.baseURI).href);
+  const n=Number($('count').value);modeUsed=$('testMode').value;activeCap=getActiveCap(modeUsed,n);
+  say('info',`${n} numbered panels; mode=${modeUsed}; live map limit=${modeUsed==='adaptive'?activeCap:'unlimited'}; timeout=${innerWidth<=800?45:30}s per map`);
+  if(config?.panels?.some(p=>p.placeholder))say('info','Configured viewer includes placeholder panel(s), which do not instantiate maps in normal use');
+  for(let i=0;i<n;i++){
+   const e=document.createElement('article');e.className='test-card';const heading=document.createElement('div');heading.className='heading';heading.textContent=`Panel ${i+1}`;
+   const map=document.createElement('div');map.className='map';const state=document.createElement('div');state.className='state';state.textContent='Waiting for map initialization…';e.append(heading,map,state);$('maps').append(e);cells.push({el:e,map,state});
+  }
+  let results;
+  if(modeUsed==='burst'){
+   // Deliberately stress the GPU just like the v7.29 simultaneous diagnostic.
+   results=await Promise.all(cells.map((_,i)=>initializeOne(i,run)));
+  }else{
+   results=[];
+   for(let i=0;i<n&&epoch===run;i++){
+    if(modeUsed==='adaptive'&&liveCount()>=activeCap)recycleOne();
+    results.push(await initializeOne(i,run));
+    if(i<n-1)await sleep(innerWidth<=800?180:80); // Give main thread and GPU a turn.
+   }
+  }
+  if(epoch!==run)return;
+  const count=results.filter(Boolean).length;
+  say(count===n?'pass':'warn',`${count}/${n} panel initializations succeeded; ${liveCount()} maps currently alive`);
+  s.textContent=`MapLibre: ${count}/${n} panels verified (${liveCount()} live concurrently, mode: ${modeUsed}).`;
+  $('plots').disabled=!count||!window.apgl?.PlotLayer;
+  $('cleanup').disabled=false;
+ }catch(e){say('fail',e.message);s.textContent='Map initialization failed: '+e.message;}
+ finally{$('start').disabled=false;$('count').disabled=false;$('testMode').disabled=false;running=false;}
+}
+function makeGrid(ds,v){const g=ds.grid||{},[_,ny,nx]=v.shape;const get=(k,alt)=>Number(g['GRIB_'+k]??alt);const R=Number(config?.display?.earthRadiusM||6371229);
+ return apgl.LambertGrid.fromLLCornerLonLat(nx,ny,get('LoVInDegrees',-97.5),get('LaDInDegrees',38.5),[get('Latin1InDegrees',38.5),get('Latin2InDegrees',38.5)],get('longitudeOfFirstGridPointInDegrees',-122.719528),get('latitudeOfFirstGridPointInDegrees',21.138123),get('DxInMetres',3000),get('DyInMetres',3000),R,R);
+}
+async function loadSample(panel){
+ const sourceId=panel.source||config.primarySource;
+ const source=(config.sources||[]).find(x=>x.id===sourceId);
+ if(!source)throw Error('No configured catalog for '+sourceId);
+ const cat=await getJson(source.catalogUrl);if(!Array.isArray(cat.datasets)||!cat.datasets.length)throw Error(sourceId+' catalog has no datasets');
+ const datasets=cat.datasets.slice().sort((a,b)=>Date.parse(b.init_time)-Date.parse(a.init_time));
+ const ds=datasets.find(ds=>ds.variables?.some(v=>(v.available_hours||[]).length));
+ if(!ds)throw Error(sourceId+' has no available field chunks');
+ const v=ds.variables.find(x=>x.name==='refc'&&x.available_hours?.length)||ds.variables.find(x=>x.available_hours?.length);
+ if(!v||v.chunks?.[0]!==1||v.chunks[1]!==v.shape[1]||v.chunks[2]!==v.shape[2])throw Error('Unsupported Zarr chunk layout');
+ if(v.dtype!=='<f4'&&v.dtype!=='|u1')throw Error('Unsupported Zarr dtype '+v.dtype);
+ const hour=v.available_hours[0];const url=new URL(`${ds.path}/${v.name}/${hour}.0.0`,new URL('.',new URL(source.catalogUrl,document.baseURI))).href;
+ const resp=await fetch(url);if(!resp.ok)throw Error('Zarr chunk HTTP '+resp.status+' ('+url+')');
+ const raw=await new Response(resp.body.pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+ if(raw.byteLength!==v.shape[1]*v.shape[2]*(v.dtype==='<f4'?4:1))throw Error('Unexpected Zarr decompressed length');
+ return {ds,v,hour,raw};
+}
+async function plotOne(i,sample){const m=maps[i];if(!m)throw Error('MapLibre panel unavailable');const {ds,v,raw}=sample;
+ const arr=v.dtype==='<f4'?new Float32Array(raw):new Uint8Array(raw);let min=Infinity,max=-Infinity;
+ for(let k=0;k<arr.length;k+=32){const x=arr[k];if(Number.isFinite(x)&&Math.abs(x)<1e15){min=Math.min(min,x);max=Math.max(max,x);}}
+ if(!Number.isFinite(min)||!Number.isFinite(max))throw Error('Sample has no finite values');
+ if(min===max){min-=1;max+=1;}
+ const grid=makeGrid(ds,v),field=new apgl.RawScalarField(grid,arr);
+ const cmap=new apgl.ColorMap([min,(min+max)/2,max],['#248fba','#f1b04b'],{underflow_color:'#00000000',overflow_color:'#f1b04b'});
+ const comp=new apgl.Raster(field,{cmap});const layer=new apgl.PlotLayer('diagnostics-zarr-'+i,comp);
+ let onAddedResolve,onAddedReject;
+ const workerReady=new Promise((resolve,reject)=>{onAddedResolve=resolve;onAddedReject=reject;});
+ const original=layer.onAdd.bind(layer);
+ layer.onAdd=(map,gl)=>{try{const work=Promise.resolve(original(map,gl));work.then(onAddedResolve,onAddedReject);return work;}catch(e){onAddedReject(e);throw e;}};
+ m.addLayer(layer);
+ await deadline(workerReady,45000,`Panel ${i+1} autumnplot geometry worker`);
+ m.triggerRepaint();
+ await deadline(new Promise(resolve=>{m.once('render',resolve);m.triggerRepaint();}),8000,`Panel ${i+1} GPU paint`);
+ status(i,'pass',`${v.name} F${String(sample.hour).padStart(3,'0')} Zarr decoded; autumnplot worker + GPU render complete`);
+}
+async function testPlots(){
+ if(running||!config)return;running=true;$('plots').disabled=true;$('start').disabled=true;$('count').disabled=true;$('testMode').disabled=true;s.textContent='Testing model chunk reads and GPU plotting…';
+ const run=epoch;
+ try{
+  if(!('DecompressionStream' in window))throw Error('DecompressionStream unavailable');
+  const configured=config.panels.filter(p=>!p.placeholder);
+  let ok=0,unavailable=0,failed=0,skipped=0;
+  // Process one map at a time: keep mobile memory bounded and make each
+  // panel's worker/renderer outcome unambiguous. In adaptive mode, expired
+  // map instances are brought back one at a time, releasing the oldest first.
+  for(let i=0;i<cells.length&&epoch===run;i++){
+   if(!verified[i]){skipped++;continue;}
+   if(!maps[i]&&modeUsed==='adaptive'){
+    if(liveCount()>=activeCap)recycleOne();
+    const started=await initializeOne(i,run);
+    if(!started){failed++;continue;}
+   }
+   if(!maps[i]){skipped++;continue;}
+   const panel=configured[i%configured.length];if(!panel){unavailable++;continue;}
+   const key=panel.source||config.primarySource;
+   try{
+    // Do not retain multiple decoded full-domain grids in a mobile browser.
+    const sample=await loadSample(panel);
+    await plotOne(i,sample);ok++;say('pass',`Panel ${i+1} (${key}): Zarr decoding and autumnplot-gl layer ready`);
+   }catch(e){
+    const msg=String(e.message||e);
+    const missing=/catalog|HTTP 404|no available|no configured|no datasets/i.test(msg);
+    if(missing){unavailable++;status(i,'warn',`Data unavailable: ${msg}`);say('warn',`Panel ${i+1} (${key}): ${msg}`);}
+    else{failed++;status(i,'fail',`GPU/Zarr failed: ${msg}`);say('fail',`Panel ${i+1} (${key}): ${msg}`);}
+   }
+   // In viewer-like mode old layers remain live until the configured cap is reached.
+   if(innerWidth<=800)await sleep(60);
+  }
+  if(epoch===run){s.textContent=`Real Zarr plotting: ${ok} rendered, ${unavailable} unavailable data, ${failed} failures, ${skipped} skipped (${liveCount()} live maps; ${cells.length} tested).`;
+   say(failed?'warn':'pass',s.textContent);}
+ }catch(e){say('fail',e.message);s.textContent='Real Zarr test failed: '+e.message;}
+ finally{running=false;$('start').disabled=false;$('count').disabled=false;$('testMode').disabled=false;$('plots').disabled=false;}
+}
+$('start').addEventListener('click',testMaps);$('plots').addEventListener('click',testPlots);$('cleanup').addEventListener('click',()=>{release();s.textContent='All test maps released.';say('info','Maps released, WebGL contexts disposed.');});
+</script>
+</body></html>

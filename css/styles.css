@@ -1,0 +1,450 @@
+:root{--bg:#09111f;--panel:#07101c;--border:#294462;--text:#edf3fb;--muted:#aebdd0;--accent:#62adff;--shadow:0 12px 30px rgba(0,0,0,.34)}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;min-height:100%;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+body{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;gap:8px;padding:8px;height:100dvh;overflow:hidden}
+.toolbar{display:flex;gap:7px;align-items:flex-end;flex-wrap:wrap;background:linear-gradient(180deg,#13223b,#0d1728);border:1px solid rgba(98,173,255,.22);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:7px;white-space:nowrap;align-self:center}.brand strong{font-size:16px;letter-spacing:.03em}.brand small{display:block;font-size:10px;color:var(--muted);margin-top:2px}.brandmark{width:35px;height:35px;border-radius:11px;background:linear-gradient(135deg,#62adff,#3182ca);color:#031322;font-size:22px;font-weight:900;display:grid;place-items:center}
+.control{display:grid;gap:5px;min-width:105px}.field-control{min-width:175px}.cycle-control{min-width:152px}.speed-control{min-width:95px}.control label{font-size:11px;color:#bac9dc;font-weight:700;letter-spacing:.02em}
+select,button,.display-box{height:38px;background:linear-gradient(180deg,#1a2b45,#14233a);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:0 8px;font-size:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}select option{background:#14233a;color:#edf3fb}button{cursor:pointer;font-weight:700;transition:background .13s,border-color .13s}button:hover:not(:disabled){background:#213a5c;border-color:rgba(98,173,255,.55)}button:disabled,select:disabled{opacity:.55;cursor:not-allowed}.display-box{display:flex;align-items:center;white-space:nowrap;min-width:133px}.spacer{flex:1 1 2px}.transport{display:inline-flex;align-items:center;gap:4px;height:38px;padding:3px;background:#14233a;border:1px solid rgba(255,255,255,.09);border-radius:999px}.round{height:29px;width:32px;padding:0;border:0;background:transparent;border-radius:18px;font-size:12px}.round.active{color:#d3ecff;background:rgba(98,173,255,.2);border:1px solid #4e84b7}.utility{white-space:nowrap;padding:0 9px}
+.helper{display:flex;align-items:center;justify-content:space-between;gap:10px;background:linear-gradient(180deg,#101d31,#0c1626);border:1px solid rgba(98,173,255,.16);border-radius:13px;padding:8px 11px;color:var(--muted);font-size:12px;line-height:1.4}.helper b{color:#f2f7ff}.catalog-badge{padding:3px 9px;background:#142843;border:1px solid #37516c;border-radius:20px;white-space:nowrap}
+.viewer-grid{--cols:1;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));grid-auto-rows:minmax(185px,1fr);gap:8px;overflow-y:auto;overflow-x:hidden;min-height:0;min-width:0;padding:1px 3px 3px 1px;align-content:stretch}
+.viewer-grid.one-panel{grid-auto-rows:minmax(260px,1fr)}.startup{display:grid;place-items:center;grid-column:1/-1;color:var(--muted);font-size:15px}
+.panel-card{display:flex;flex-direction:column;min-width:0;min-height:215px;background:#0c1728;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}.panel-card.selected{border-color:var(--accent);box-shadow:0 0 0 1px rgba(98,173,255,.35),var(--shadow)}
+.panel-header{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 9px;background:#10223a;min-width:0}.panel-name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.panel-save{height:24px;border-radius:7px;font-size:10px;background:#1a3655;padding:0 8px;white-space:nowrap}
+.panel-viewport{position:relative;overflow:hidden;flex:1;min-height:125px;background:#07121e;cursor:crosshair;touch-action:none;user-select:none}.panel-viewport.dragging{cursor:crosshair}.image-layer{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;will-change:transform}.image-layer canvas{position:absolute;left:0;top:0;display:block}.plot-label{position:absolute;top:8px;left:8px;z-index:3;padding:5px 8px;background:rgba(3,11,19,.72);border:1px solid rgba(255,255,255,.15);border-radius:8px;max-width:calc(100% - 16px);pointer-events:none}.plot-label strong{display:block;font-size:11px}.plot-label span{display:block;font-size:10px;color:#d1ddea;padding-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notice{display:none;position:absolute;z-index:5;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(6,14,25,.91);padding:12px 17px;border:1px solid #3b5877;border-radius:11px;color:#edf3fb;font-size:12px;text-align:center;max-width:90%;line-height:1.5}.notice.visible{display:block}.point-info{position:absolute;bottom:7px;left:7px;pointer-events:none;background:rgba(6,14,25,.86);border:1px solid #37516c;border-radius:8px;padding:5px 7px;font-size:10px;z-index:3;font-variant-numeric:tabular-nums}
+.panel-footer{min-width:0;background:#102036;border-top:1px solid #294462;padding:5px 8px 7px}.legend-title{font-size:10px;color:#dfe9f5;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.legend-canvas{width:100%;height:9px;border:1px solid #456080;border-radius:3px;display:block}.legend-labels{display:flex;justify-content:space-between;gap:3px;font-size:9px;color:#c6d6e9;margin-top:3px;font-variant-numeric:tabular-nums}.plot-footer{display:flex;justify-content:space-between;gap:15px;background:linear-gradient(180deg,#101d31,#0c1626);border:1px solid rgba(98,173,255,.16);border-radius:13px;padding:8px 13px;font-size:11px;color:var(--muted);line-height:1.5}
+@media(max-width:800px){body{height:auto;min-height:100dvh;overflow:auto;grid-template-rows:auto auto minmax(65vh,1fr) auto}.viewer-grid{overflow-y:visible;grid-auto-rows:minmax(260px,50vh)}.plot-footer{flex-wrap:wrap}.helper{display:block}.catalog-badge{display:inline-block;margin-top:6px}}
+@media(max-width:560px){body{padding:6px}.toolbar{padding:9px;gap:8px}.control,.cycle-control,.field-control{min-width:calc(50% - 8px);flex:1 1 130px}.panel-card{min-height:250px}}
+
+/* OMD EVU themes: user preference is saved locally, while the configured theme is the default. */
+:root,html[data-theme="dark"]{color-scheme:dark;--bg:#09111f;--panel:#0b1728;--card-head:#12233a;--border:#304761;--text:#e8f0fb;--muted:#a9bacf;--control:#182b45;--controlHover:#254063;--surface:#102139;--map-bg:#0d2132;--plot-label:rgba(6,16,30,.87);--plot-label-text:#d1e0f2;--highlight:#70b9ff}
+html[data-theme="light"]{color-scheme:light;--bg:#e8eef5;--panel:#ffffff;--card-head:#eff4f9;--border:#adbecf;--text:#1c3044;--muted:#52677c;--control:#fff;--controlHover:#e0ebf5;--surface:#f6f9fd;--map-bg:#c8d9e5;--plot-label:rgba(255,255,255,.88);--plot-label-text:#29435e;--highlight:#245e9e;--shadow:0 7px 20px rgba(27,56,90,.09)}
+html[data-theme] .toolbar,html[data-theme] .helper,html[data-theme] .plot-footer{background:var(--surface);color:var(--muted);border-color:var(--border)}
+html[data-theme] .toolbar{border-radius:13px}
+html[data-theme] .panel-card{background:var(--panel);border-color:var(--border)}
+html[data-theme] .panel-card.selected{border-color:var(--highlight);box-shadow:0 0 0 1px var(--highlight),var(--shadow)}
+html[data-theme] .panel-header,html[data-theme] .panel-footer{background:var(--card-head);border-color:var(--border)}
+html[data-theme] .panel-viewport{background:var(--map-bg)}
+html[data-theme] select,html[data-theme] button,html[data-theme] .display-box{background:var(--control);color:var(--text);border-color:var(--border);box-shadow:none}
+html[data-theme] select option{background:var(--control);color:var(--text)}
+html[data-theme] button:hover:not(:disabled){background:var(--controlHover);border-color:var(--highlight)}
+html[data-theme] .transport{background:var(--surface);border-color:var(--border)}
+html[data-theme] .round.active{background:var(--controlHover);border-color:var(--highlight);color:var(--highlight)}
+html[data-theme] .control label,html[data-theme] .helper b,html[data-theme] .legend-title{color:var(--text)}
+html[data-theme] .legend-labels{color:var(--muted)}
+html[data-theme] .plot-label{background:var(--plot-label);color:var(--text);border-color:var(--border);backdrop-filter:blur(3px)}
+html[data-theme] .plot-label span{color:var(--plot-label-text)}
+html[data-theme] .notice,html[data-theme] .point-info{background:var(--plot-label);color:var(--text);border-color:var(--border)}
+html[data-theme] .catalog-badge{background:var(--control);color:var(--muted);border-color:var(--border)}
+html[data-theme] .brandmark{width:43px;height:36px;font-size:13px;background:linear-gradient(135deg,#4da7ee,#2662a1);letter-spacing:-.5px;color:#fff}
+html[data-theme] .brand strong{font-size:16px;letter-spacing:0}
+html[data-theme] .brand small{font-size:11px}
+html[data-theme] .panel-viewport .image-layer{image-rendering:auto}
+.theme-toggle{min-width:88px}
+@media(max-width:800px){.theme-toggle{order:-1}}
+
+/* Choose between orthographic globe context and classic Lambert domain projection. */
+.map-view-control{min-width:100px}
+@media(max-width:560px){.map-view-control{min-width:115px;flex:1 1 115px}}
+
+/* The weather field is nearest-neighbor on zoom; vector geography stays smooth. */
+.image-layer canvas.field-canvas{image-rendering:auto}
+/* autumnplot-gl / MapLibre custom rendering surface */
+.panel-viewport{position:relative;overflow:hidden;touch-action:auto;cursor:crosshair}
+.map-frame{position:absolute;inset:0;z-index:0}
+.map-frame .maplibregl-canvas{cursor:crosshair}
+.map-frame .maplibregl-canvas:active{cursor:crosshair}
+.map-frame .maplibregl-control-container{pointer-events:none}
+.plot-label,.point-info,.notice{z-index:4}
+.map-snapshot{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:var(--map-bg);z-index:1;pointer-events:none}
+.panel-viewport .plot-label{max-width:calc(100% - 16px)}
+.panel-viewport .notice{font-weight:600}
+.panel-viewport.has-live-map .map-snapshot{display:none}
+.panel-footer .legend-canvas{height:13px}
+
+/* Footer link remains legible in dark and light mode. */
+.plot-footer a{color:inherit;text-decoration:underline;text-underline-offset:2px}.plot-footer a:hover{opacity:.8}
+
+/* Numeric legends: more exact ticks, scaled to panel widths via container queries. */
+.panel-card{container-type:inline-size}
+.panel-footer .legend-labels{display:block;position:relative;height:18px;margin-top:4px;font-variant-numeric:tabular-nums}
+.panel-footer .legend-tick{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;font-size:9px;line-height:13px}
+.panel-footer .legend-tick:first-child{transform:none}
+.panel-footer .legend-tick:last-child{transform:translateX(-100%)}
+@container (max-width:610px){.panel-footer .legend-tick[data-odd="1"]{display:none}}
+
+/* v7.11 compact controls: one efficient row where space permits. */
+body{gap:6px}
+.toolbar{display:flex;align-items:center;gap:9px;padding:7px 10px;flex-wrap:wrap}
+.toolbar-brandline{display:contents}
+.toolbar-brand-actions{display:contents}
+.toolbar .brand{flex:0 0 auto;align-self:center}
+.toolbar .brandmark{width:36px;height:33px}
+.toolbar .brand strong{font-size:14px}
+.toolbar .brand small{font-size:10px}
+.toolbar-controls{display:flex;flex:1 1 900px;align-items:flex-end;gap:6px;flex-wrap:wrap;min-width:0}
+.toolbar-controls .control{gap:3px;min-width:0;flex:0 1 auto}
+.toolbar-controls .control label{font-size:10px}
+.toolbar-controls select{width:100%;font-size:11px;padding:0 6px}
+.toolbar-controls .field-control{width:190px;max-width:220px}
+.toolbar-controls .cycle-control{width:159px}
+.toolbar-controls .forecast-control{width:85px}
+.toolbar-controls .speed-control{width:81px}
+.toolbar-controls .map-view-control{width:121px}
+.toolbar select,.toolbar button,.toolbar .display-box{height:32px;border-radius:8px}
+.toolbar .transport{height:32px;padding:2px;gap:2px;flex:0 0 auto}
+.toolbar .round{height:26px;width:29px;font-size:11px}
+.toolbar .utility{font-size:11px;padding:0 8px}
+.toolbar-utilities{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.toolbar .theme-toggle{min-width:0;width:34px;height:34px;font-size:19px;padding:0;line-height:1;order:4;margin-left:auto;flex:0 0 34px}
+.helper{padding:5px 10px;font-size:11px;min-height:26px}
+.mobile-controls-btn{display:none}
+@media (max-width:800px){
+ body{grid-template-rows:auto auto minmax(65vh,1fr) auto}
+ .toolbar{display:block;padding:7px 9px}
+ .toolbar-brandline{display:flex;justify-content:space-between;gap:8px;align-items:center;min-width:0}
+ .toolbar-brand-actions{display:flex;align-items:center;gap:7px}
+ .mobile-controls-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap}
+ .toolbar .theme-toggle{margin:0;order:initial}
+ .toolbar-controls{display:none;flex:1 1 auto;margin-top:9px;border-top:1px solid var(--border);padding-top:9px;align-items:flex-end;gap:7px}
+ .toolbar-controls.is-open{display:flex}
+ .toolbar-controls .field-control{flex:2 1 180px;width:auto;max-width:none}
+ .toolbar-controls .cycle-control{flex:1 1 140px;width:auto}
+ .toolbar-controls .forecast-control{flex:0 1 88px;width:88px}
+ .toolbar-controls .speed-control{flex:0 1 88px;width:88px}
+ .toolbar-controls .map-view-control{flex:0 1 130px;width:130px}
+ .toolbar-utilities{flex:1 1 100%;}
+ .toolbar .brand small{font-size:9px}
+ .toolbar .brand strong{font-size:13px}
+ .toolbar .transport{margin:0}
+}
+@media (max-width:560px){
+ .toolbar-controls .control,.toolbar-controls .cycle-control,.toolbar-controls .field-control{min-width:0}
+ .toolbar-controls .field-control{flex:1 1 100%}
+ .toolbar-controls .cycle-control{flex:2 1 120px}
+ .toolbar-controls .forecast-control{flex:1 1 77px;width:auto}
+ .toolbar-controls .map-view-control{flex:1 1 115px;width:auto}
+ .toolbar-utilities{justify-content:space-between}
+ .toolbar .brandmark{width:33px;height:32px}
+}
+
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center}
+.theme-toggle svg{display:block;width:19px;height:19px;flex:0 0 auto}
+
+
+/* v7.12: tight speed steppers and slide-export chooser */
+.toolbar-controls .speed-control{width:112px}
+.speed-buttons{display:flex;align-items:center;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--control);overflow:hidden}
+.toolbar .speed-buttons button{height:30px;min-width:28px;padding:0;border:0;border-radius:0;font-size:17px;line-height:1;background:transparent}
+.speed-buttons output{display:inline-flex;flex:1;justify-content:center;align-items:center;min-width:36px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.export-dialog{position:fixed;inset:auto;max-width:min(430px,calc(100vw - 24px));width:100%;padding:0;border:1px solid var(--border);border-radius:16px;background:var(--panel);color:var(--text);box-shadow:0 30px 90px #0008}
+.export-dialog::backdrop{background:rgba(2,8,18,.74);backdrop-filter:blur(3px)}
+.export-dialog form{padding:20px}
+.export-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.export-heading h2{font-size:18px;margin:0}
+.export-dialog .export-close{height:30px;width:30px;flex:0 0 30px;padding:0;font-size:24px}
+.export-dialog p{font-size:13px;color:var(--muted);line-height:1.5;margin:10px 0 17px}
+.export-ratios{margin:0;border:0;padding:0;display:grid;gap:9px}
+.export-ratios legend{font-size:12px;font-weight:700;padding:0;margin-bottom:10px}
+.export-choice{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--border);border-radius:10px;background:var(--surface);cursor:pointer}
+.export-choice:has(input:checked){border-color:var(--highlight);box-shadow:0 0 0 1px var(--highlight)}
+.export-choice input{accent-color:var(--highlight);width:16px;height:16px;flex:none}
+.export-choice span{display:grid;gap:4px;font-size:13px}
+.export-choice small{font-size:11px;color:var(--muted)}
+.export-dialog .export-busy{margin:9px 0;min-height:14px;font-size:12px}
+.export-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:12px}
+.export-actions button{height:36px}
+.export-actions .export-primary{background:var(--highlight);color:var(--bg);border-color:var(--highlight);font-weight:700}
+@media(max-width:800px){.toolbar-controls .speed-control{flex:0 0 112px;width:112px}}
+
+/* v7.14: preserve the ninth verifying-analysis slot without initializing WebGL. */
+.panel-card.analysis-placeholder .panel-viewport{background:radial-gradient(ellipse at 50% 28%,rgba(72,111,155,.17),transparent 70%),var(--map-bg);}
+.panel-card.analysis-placeholder .notice{top:50%;left:50%;transform:translate(-50%,-50%);max-width:90%;width:max-content;text-align:center;white-space:normal;}
+.panel-card.analysis-placeholder .panel-footer{min-height:55px;}
+.panel-card.analysis-placeholder .legend-canvas{visibility:hidden;}
+
+/* v7.15: map-aligned 10-m wind barbs. Kept out of WebGL DOM to preserve plot engine. */
+.wind-overlay{position:absolute;inset:0;z-index:2;width:100%;height:100%;pointer-events:none;display:block;}
+.export-framing{border:0;padding:0;margin:16px 0 6px;display:grid;gap:8px;}
+.export-framing legend{font-size:12px;font-weight:700;margin-bottom:7px;}
+.export-framing label{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;}
+.export-framing input{accent-color:var(--highlight);}
+.export-framing small{font-size:11px;color:var(--muted);}
+
+
+/* v7.16: plot-first panels and responsive compact legends. */
+/* The model and valid time remain INSIDE the plot, not in a redundant header. */
+.panel-card .panel-header{display:none}
+.panel-viewport{min-height:0}
+.panel-viewport .plot-label{max-width:calc(100% - 55px)}
+.panel-viewport .panel-save{
+ position:absolute;right:7px;top:7px;z-index:7;
+ width:29px;height:29px;min-width:29px;padding:5px;
+ display:flex;align-items:center;justify-content:center;
+ border-radius:8px;border:1px solid var(--border);
+ background:var(--plot-label);color:var(--text);
+ backdrop-filter:blur(4px);opacity:.92;cursor:pointer;
+}
+.panel-viewport .panel-save svg{display:block;width:17px;height:17px;flex:0 0 auto}
+.panel-viewport .panel-save:disabled{opacity:.35;pointer-events:none}
+.panel-viewport .panel-save:hover:not(:disabled){opacity:1}
+/* Smaller horizontal legends: used for single/few panels and narrow screens. */
+.panel-footer{padding:3px 7px 4px}
+.panel-footer .legend-title{margin-bottom:2px;font-size:9px;line-height:11px}
+.panel-footer .legend-canvas{height:10px}
+.panel-footer .legend-labels{height:13px;margin-top:2px}
+.panel-footer .legend-tick{line-height:11px;font-size:8px}
+/* Right-side colorbars for 6+ panels on sufficiently wide 3+ column layouts. */
+.viewer-grid.vertical-legends .panel-card:not(.analysis-placeholder){flex-direction:row}
+.viewer-grid.vertical-legends .panel-card:not(.analysis-placeholder)>.panel-viewport{flex:1 1 auto;min-width:0;min-height:0}
+.viewer-grid.vertical-legends .panel-card:not(.analysis-placeholder)>.panel-footer{
+ flex:0 0 74px;width:74px;min-width:74px;position:relative;
+ border-top:0;border-left:1px solid var(--border);
+ padding:5px 5px;
+}
+.viewer-grid.vertical-legends .panel-footer .legend-title{
+ font-size:9px;line-height:11px;text-align:center;
+ margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.viewer-grid.vertical-legends .panel-footer .legend-canvas{
+ position:absolute;left:7px;top:23px;bottom:7px;
+ width:13px;height:calc(100% - 30px);border-radius:3px;
+}
+.viewer-grid.vertical-legends .panel-footer .legend-labels{
+ position:absolute;left:24px;right:4px;top:23px;bottom:7px;
+ display:block;height:auto;margin:0;overflow:visible;
+}
+.viewer-grid.vertical-legends .panel-footer .legend-tick{
+ left:0!important;top:auto;transform:translateY(-50%);
+ font-size:9px;line-height:10px;
+}
+.viewer-grid.vertical-legends .panel-footer .legend-tick[data-end="top"]{transform:translateY(0)}
+.viewer-grid.vertical-legends .panel-footer .legend-tick[data-end="bottom"]{transform:translateY(-100%)}
+@container (max-width:610px){.viewer-grid.vertical-legends .panel-footer .legend-tick[data-odd="1"]{display:block}}
+@media(max-width:800px){.panel-viewport{min-height:170px}}
+
+/* Analysis has no colorbar until RAP/MRMS analysis data are available. */
+.panel-card.analysis-placeholder>.panel-footer{display:none}
+
+
+/* v7.17: share one field legend and maximize every panel's map area. */
+.viewer-workspace{display:flex;flex-direction:column;min-width:0;min-height:0;gap:0;overflow:hidden;}
+.viewer-workspace>.viewer-grid{flex:1 1 auto;min-height:0;min-width:0;}
+.viewer-grid{gap:1px;padding:0;grid-auto-rows:minmax(120px,1fr);background:var(--border);}
+.panel-card,html[data-theme] .panel-card{min-height:100px;border:0;border-radius:0;box-shadow:none;}
+.panel-card.selected,html[data-theme] .panel-card.selected{border:0;box-shadow:inset 0 0 0 2px var(--highlight);}
+.panel-card>.panel-footer,.viewer-grid.vertical-legends .panel-card>.panel-footer{display:none;}
+.shared-legend{
+ flex:0 0 auto;min-height:47px;display:flex;align-items:center;gap:15px;
+ padding:4px 11px;background:var(--surface);color:var(--text);
+ border-top:1px solid var(--border);min-width:0;
+}
+.shared-legend-title{font-size:11px;font-weight:700;white-space:nowrap;max-width:240px;overflow:hidden;text-overflow:ellipsis;flex:0 1 240px;}
+.shared-legend-track{flex:1 1 auto;min-width:0;max-width:1000px;position:relative;align-self:center;}
+.shared-legend-canvas{display:block;width:100%;height:14px;border:1px solid var(--border);border-radius:2px;}
+.shared-legend-labels{height:16px;position:relative;margin-top:3px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.shared-legend-tick{position:absolute;top:0;font-size:10px;white-space:nowrap;transform:translateX(-50%);}
+.shared-legend-tick[data-end="first"]{transform:none;}
+.shared-legend-tick[data-end="last"]{transform:translateX(-100%);}
+@media(max-width:800px){
+ .viewer-workspace{overflow:visible;}
+ .viewer-workspace>.viewer-grid{overflow-y:visible;flex:0 0 auto;grid-auto-rows:minmax(255px,auto);}
+ .panel-card,html[data-theme] .panel-card{min-height:240px;}
+ .shared-legend{flex-wrap:wrap;gap:1px;min-height:56px;padding:5px 8px;}
+ .shared-legend-title{flex:1 1 100%;max-width:none;font-size:10px;}
+ .shared-legend-track{flex:1 1 100%;max-width:none;}
+ .shared-legend-tick{font-size:9px;}
+}
+
+
+/* v7.19: status and plotting credit share the instructions strip; no footer. */
+body{grid-template-rows:auto auto minmax(0,1fr);}
+.helper{display:flex;align-items:center;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;padding:5px 10px;}
+.helper-instructions{min-width:0;flex:1 1 360px;}
+.helper-status{display:inline-flex;align-items:center;justify-content:flex-end;gap:12px;min-width:0;flex:1 1 330px;text-align:right;font-size:10px;white-space:nowrap;}
+.helper-status #dataStatus{font-variant-numeric:tabular-nums;}
+.helper-credit a{color:inherit;text-decoration:underline;text-underline-offset:2px;}
+@media (max-width:1050px){.helper-status{justify-content:flex-start;text-align:left;flex-wrap:wrap;white-space:normal;}}
+@media (max-width:800px){body{grid-template-rows:auto auto minmax(65vh,1fr);}.helper{display:flex;gap:3px;}.helper-instructions,.helper-status{flex:1 1 100%;}.helper-status{justify-content:flex-start;}}
+
+/* v7.20: projected, noninteractive counterpart cursors. The real OS cursor
+   remains a normal white crosshair/pointer; these never intercept events. */
+.sync-crosshair{position:absolute;z-index:6;width:23px;height:23px;
+ transform:translate(-50%,-50%);pointer-events:none;user-select:none;
+ filter:drop-shadow(0 0 2px #051c2a);}
+.sync-crosshair::before,.sync-crosshair::after{content:'';position:absolute;background:#00f3e3;
+ box-shadow:0 0 0 1px rgba(7,32,42,.4);}
+.sync-crosshair::before{height:2px;width:23px;top:10.5px;left:0;}
+.sync-crosshair::after{width:2px;height:23px;left:10.5px;top:0;}
+.sync-crosshair[hidden]{display:none!important}
+/* Export dialog opens adjacent to the clicked toolbar button or panel icon. */
+.export-dialog{margin:0;inset:auto;max-height:calc(100dvh - 16px);overflow:auto}
+
+/* v7.20: give the common color scale the complete grid width. Keep its
+   field title centered directly above the swatches on desktop and mobile. */
+.shared-legend{flex-direction:column;justify-content:center;align-items:stretch;gap:2px;
+ padding:3px 16px 5px;min-height:49px;}
+.shared-legend-title{flex:0 0 auto;max-width:none;width:100%;font-size:11px;line-height:14px;
+ text-align:center;white-space:nowrap;}
+.shared-legend-track{flex:0 0 auto;width:100%;max-width:none;min-width:0;}
+.shared-legend-canvas{height:13px;}
+.shared-legend-labels{margin-top:1px;height:15px;}
+@media (max-width:800px){.shared-legend{gap:2px;padding:3px 9px 5px;min-height:49px;}
+ .shared-legend-title,.shared-legend-track{flex:0 0 auto;max-width:none;width:100%;}
+}
+
+
+/* v7.40: keep the glowing master crosshair locked to the actual mouse.
+   The previous white/glowing DOM overlay was painted one or more animation
+   frames after the OS pointer and could visibly trail it during movement.
+   Use a single native cursor image with a center-accurate (24,24) hotspot.
+   Geographic counterparts remain DOM overlays in the other panels. */
+@media (pointer: fine) {
+  .panel-viewport {cursor:url('cursor-master-glow.svg') 24 24,crosshair;}
+  .map-frame .maplibregl-canvas,
+  .map-frame .maplibregl-canvas:active {
+    cursor:url('cursor-master-glow.svg') 24 24,crosshair !important;
+  }
+}
+/* The native hand remains the only click target; a halo highlights it. */
+.panel-viewport .panel-save:hover:not(:disabled){
+ box-shadow:0 0 0 1px rgba(255,255,255,.9),0 0 9px 3px rgba(255,255,255,.50),
+ 0 0 21px 6px rgba(60,190,255,.55);
+ cursor:url('cursor-hand-glow.svg') 13 3,pointer;
+}
+
+
+/* v7.28: in-workspace single-panel focus. Keep the shared legend/toolbar.
+   Non-focused maps stay mounted but aren't resized at zero dimensions. */
+.panel-viewport .panel-expand{
+ position:absolute;right:7px;bottom:7px;z-index:9;
+ display:flex;align-items:center;justify-content:center;
+ width:29px;height:29px;min-width:29px;padding:5px;
+ border:1px solid var(--border);border-radius:8px;
+ background:var(--plot-label);color:var(--text);
+ backdrop-filter:blur(4px);opacity:.92;cursor:pointer;
+}
+.panel-viewport .panel-expand svg{width:17px;height:17px;display:block;pointer-events:none}
+.panel-viewport .panel-expand:hover,.panel-viewport .panel-expand:focus-visible{
+ opacity:1;box-shadow:0 0 0 1px rgba(255,255,255,.45),0 0 9px rgba(73,174,255,.48);
+}
+.viewer-workspace>.viewer-grid.focus-panel{
+ --cols:1;grid-template-columns:minmax(0,1fr);grid-auto-rows:minmax(0,1fr);
+ overflow:hidden;align-content:stretch;
+}
+.viewer-grid.focus-panel>.panel-card:not(.is-focused){display:none!important}
+.viewer-grid.focus-panel>.panel-card.is-focused{
+ grid-column:1;grid-row:1;width:100%;height:100%;min-width:0;min-height:0;
+}
+@media(max-width:800px){
+ .viewer-workspace>.viewer-grid.focus-panel{
+  flex:0 0 auto;grid-template-columns:minmax(0,1fr);
+  grid-auto-rows:minmax(0,1fr);height:max(340px,65dvh);
+  overflow:hidden;
+ }
+ .viewer-grid.focus-panel>.panel-card.is-focused{min-height:0}
+}
+
+/* Full diagnostics for long analysis/grid errors; tap to see or copy details. */
+.notice.error-details{white-space:pre-line;overflow-wrap:anywhere;max-height:68%;overflow-y:auto;cursor:pointer;user-select:text;overscroll-behavior:contain}
+
+
+/* v7.37: desktop-only placement control. The <=800px mobile controls and
+   collapse/expand behavior remain exactly as before. */
+.controls-position-toggle{display:none!important}
+@media (min-width:801px){
+ .toolbar .controls-position-toggle{
+  display:inline-flex!important;align-items:center;justify-content:center;
+  width:34px;min-width:34px;height:34px;flex:0 0 34px;order:5;
+  padding:0;line-height:1;
+ }
+ .controls-position-toggle svg{display:block;width:19px;height:19px;flex:0 0 auto}
+ .controls-position-toggle:focus-visible{outline:2px solid var(--highlight);outline-offset:2px}
+ html[data-controls-position="left"] body{
+  grid-template-columns:clamp(220px,18vw,260px) minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr);
+ }
+ html[data-controls-position="left"] .toolbar{
+  grid-column:1;grid-row:1;min-height:0;min-width:0;
+  display:flex;flex-direction:column;flex-wrap:nowrap;align-items:stretch;
+  justify-content:flex-start;gap:14px;padding:13px 11px;
+  overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;
+ }
+ html[data-controls-position="left"] .toolbar-brandline{
+  display:flex;flex-direction:column;gap:10px;align-items:stretch;
+ }
+ html[data-controls-position="left"] .toolbar .brand{
+  align-self:stretch;white-space:normal;min-width:0;
+ }
+ html[data-controls-position="left"] .toolbar .brand>div:last-child{min-width:0}
+ html[data-controls-position="left"] .toolbar .brand strong{font-size:14px;line-height:1.2;display:block}
+ html[data-controls-position="left"] .toolbar .brand small{font-size:10px}
+ html[data-controls-position="left"] .toolbar-brand-actions{
+  display:flex;align-items:center;justify-content:flex-end;gap:7px;
+ }
+ html[data-controls-position="left"] .toolbar .theme-toggle{
+  order:initial;margin:0;flex:0 0 34px;
+ }
+ html[data-controls-position="left"] .toolbar .controls-position-toggle{
+  order:initial;margin:0;
+ }
+ html[data-controls-position="left"] .toolbar-controls{
+  display:flex;flex:0 0 auto;flex-direction:column;align-items:stretch;
+  flex-wrap:nowrap;gap:11px;min-width:0;width:100%;
+ }
+ html[data-controls-position="left"] .toolbar-controls .control,
+ html[data-controls-position="left"] .toolbar-controls .field-control,
+ html[data-controls-position="left"] .toolbar-controls .cycle-control,
+ html[data-controls-position="left"] .toolbar-controls .forecast-control,
+ html[data-controls-position="left"] .toolbar-controls .speed-control,
+ html[data-controls-position="left"] .toolbar-controls .map-view-control{
+  width:100%;max-width:none;min-width:0;flex:0 0 auto;
+ }
+ html[data-controls-position="left"] .toolbar-controls .control label{font-size:11px}
+ html[data-controls-position="left"] .toolbar-controls select{width:100%}
+ html[data-controls-position="left"] .toolbar .transport{
+  align-self:stretch;justify-content:space-around;width:100%;margin:0;
+ }
+ html[data-controls-position="left"] .speed-buttons{width:100%}
+ html[data-controls-position="left"] .toolbar-utilities{
+  width:100%;display:grid;grid-template-columns:minmax(0,1fr);gap:7px;
+ }
+ html[data-controls-position="left"] .toolbar-utilities .utility{width:100%;min-width:0}
+ html[data-controls-position="left"] .toolbar>.helper{
+  flex:0 0 auto;width:100%;min-width:0;margin-top:auto;
+  display:flex;flex-direction:column;align-items:stretch;
+  justify-content:flex-start;gap:9px;padding:10px 9px;
+  text-align:left;overflow-wrap:break-word;
+ }
+ html[data-controls-position="left"] .toolbar>.helper .helper-instructions{
+  flex:0 0 auto;min-width:0;width:100%;line-height:1.65;
+ }
+ html[data-controls-position="left"] .toolbar>.helper .helper-status{
+  display:flex;flex:0 0 auto;flex-direction:column;align-items:flex-start;
+  justify-content:flex-start;gap:8px;text-align:left;
+  min-width:0;width:100%;white-space:normal;line-height:1.5;
+ }
+ html[data-controls-position="left"] .toolbar>.helper #dataStatus{
+  width:100%;white-space:normal;overflow-wrap:anywhere;
+ }
+ html[data-controls-position="left"] .toolbar>.helper .helper-credit{
+  width:100%;overflow-wrap:anywhere;
+ }
+ html[data-controls-position="left"] .viewer-workspace{
+  grid-column:2;grid-row:1;min-width:0;min-height:0;
+ }
+}
+
+/* v7.42: smooth labeled isolines above shading, below hover and panel controls. */
+.contour-overlay{position:absolute;inset:0;z-index:3;width:100%;height:100%;pointer-events:none;display:block}
+.contour-control[hidden]{display:none!important}
+.toolbar-controls .contour-control{width:112px;min-width:102px}
+.contour-switch{display:flex;align-items:center;gap:6px;height:32px;padding:3px 8px;
+ border:1px solid var(--border);border-radius:8px;background:var(--control);color:var(--text);
+ font-size:11px!important;white-space:nowrap;cursor:pointer}
+.contour-switch input{width:15px;height:15px;accent-color:var(--accent)}
+@media(min-width:801px){html[data-controls-position="left"] .toolbar-controls .contour-control{width:100%}}
+
+/* Wind barbs remain on top when contours are also enabled. */
+.wind-overlay{z-index:4}

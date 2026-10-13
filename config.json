@@ -1,0 +1,155 @@
+{
+  "sources": [
+    {
+      "id": "rrfs",
+      "label": "RRFS",
+      "catalogUrl": "data/catalog_rrfs.json"
+    },
+    {
+      "id": "hrrr",
+      "label": "HRRR",
+      "catalogUrl": "data/catalog_hrrr.json"
+    },
+    {
+      "id": "refs_m001",
+      "label": "REFS-1",
+      "catalogUrl": "data/catalog_refs_m001.json"
+    },
+    {
+      "id": "refs_m002",
+      "label": "REFS-2",
+      "catalogUrl": "data/catalog_refs_m002.json"
+    },
+    {
+      "id": "refs_m003",
+      "label": "REFS-3",
+      "catalogUrl": "data/catalog_refs_m003.json"
+    },
+    {
+      "id": "refs_m004",
+      "label": "REFS-4",
+      "catalogUrl": "data/catalog_refs_m004.json"
+    },
+    {
+      "id": "refs_m005",
+      "label": "REFS-5",
+      "catalogUrl": "data/catalog_refs_m005.json"
+    },
+    {
+      "id": "refs_mean",
+      "label": "REFS-mean",
+      "catalogUrl": "data/catalog_refs_mean.json"
+    },
+    {
+      "id": "analysis",
+      "label": "Verification analysis",
+      "catalogUrl": "data/catalog_analysis.json"
+    }
+  ],
+  "primarySource": "rrfs",
+  "panels": [
+    {
+      "id": "rrfs",
+      "source": "rrfs",
+      "label": "RRFS"
+    },
+    {
+      "id": "hrrr",
+      "source": "hrrr",
+      "label": "HRRR"
+    },
+    {
+      "id": "refs-1",
+      "source": "refs_m001",
+      "label": "REFS-1"
+    },
+    {
+      "id": "refs-2",
+      "source": "refs_m002",
+      "label": "REFS-2"
+    },
+    {
+      "id": "refs-3",
+      "source": "refs_m003",
+      "label": "REFS-3"
+    },
+    {
+      "id": "refs-4",
+      "source": "refs_m004",
+      "label": "REFS-4"
+    },
+    {
+      "id": "refs-5",
+      "source": "refs_m005",
+      "label": "REFS-5"
+    },
+    {
+      "id": "refs-mean",
+      "source": "refs_mean",
+      "label": "REFS-mean"
+    },
+    {
+      "id": "analysis",
+      "source": "analysis",
+      "label": "Analysis",
+      "timeMode": "analysis"
+    }
+  ],
+  "layout": {
+    "columns": 3,
+    "maxPanels": 20
+  },
+  "defaultField": "refc",
+  "defaultForecastHour": 0,
+  "loopOnlyAvailableHours": true,
+  "display": {
+    "maxConcurrentFetches": 6,
+    "mapInitTimeoutSeconds": 90,
+    "decodedCacheMB": 256,
+    "showCountryBoundaries": true,
+    "showStateBoundaries": true,
+    "showCoastlines": true,
+    "showCountiesOnZoom": true,
+    "showLandFill": true,
+    "mapProjection": "lambert",
+    "fieldRendering": "raster",
+    "globeCountyMinZoom": 4.3,
+    "countyMinZoom": 4.25,
+    "maxActiveMaps": 9,
+    "maxZoom": 12,
+    "syncMaps": true,
+    "earthRadiusM": 6371229.0,
+    "limitFlatZoomOut": true,
+    "limitFlatPan": false,
+    "dataExtentPaddingPx": 40,
+    "gpuInitTimeoutSeconds": 35,
+    "chunkTimeoutSeconds": 150,
+    "globeInitialZoom": 2.6,
+    "modelExtentZoomOutAllowance": 0.7,
+    "legendTickCount": 11,
+    "exportPanelWidth": 1920,
+    "exportAllWidth": 2560,
+    "displayReadyCacheMB": 192,
+    "loopIntervalMs": 850,
+    "exportPanelWidth43": 1600,
+    "exportAllWidth43": 2048,
+    "prefetchEnabled": true,
+    "prefetchHours": 24,
+    "prefetchDelayMs": 220,
+    "windBarbSizePx": 18,
+    "windBarbMinSpacingPx": 22,
+    "exportMaxPixelRatio": 4,
+    "synchronizedCursors": true,
+    "detailMinZoom": 0,
+    "prefetchBatchSize": 16,
+    "prefetchIdleAfterMs": 1800,
+    "prefetchIdleConcurrency": 3,
+    "prefetchActiveConcurrency": 1,
+    "prefetchMemoryOnlyHours": 2,
+    "prefetchDiskCacheMB": 512,
+    "prefetchDiskMaxChunks": 350,
+    "prefetchCacheTTLHours": 24,
+    "countyPreloadLeadZoom": 0.35
+  },
+  "theme": "dark"
+}

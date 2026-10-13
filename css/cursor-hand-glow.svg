@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 38 38">
+<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2"/></filter></defs>
+<path d="M12.3 31.9 8.1 22.2Q7 19.6 9.4 18.6q1.6-.7 3 1.1l1.3 1.6V7.2a2.8 2.8 0 0 1 5.6 0v10.3a2.8 2.8 0 0 1 5.3-.1 2.9 2.9 0 0 1 5.4 1.2 2.7 2.7 0 0 1 4.1 2.4v7q0 6.2-6.2 7.3h-8.5q-5.1 0-7.1-3.4Z" fill="#79d8ff" stroke="#91e9ff" stroke-width="4" opacity=".92" filter="url(#glow)"/>
+<path d="M12.3 31.9 8.1 22.2Q7 19.6 9.4 18.6q1.6-.7 3 1.1l1.3 1.6V7.2a2.8 2.8 0 0 1 5.6 0v10.3a2.8 2.8 0 0 1 5.3-.1 2.9 2.9 0 0 1 5.4 1.2 2.7 2.7 0 0 1 4.1 2.4v7q0 6.2-6.2 7.3h-8.5q-5.1 0-7.1-3.4Z" fill="#f8fdff" stroke="#083450" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>
