@@ -110,7 +110,7 @@ EXTRA_COMMON=(
 )
 if [[ "$NO_PUBLISH" == 1 ]]; then EXTRA_COMMON+=(--no-publish); fi
 if [[ "$VERIFY_ENABLED" == 1 && "$MODELS_ONLY" != 1 ]]; then
-  echo "== $(date -u +%FT%TZ) Hourly RAP/URMA/MRMS verification =="
+  echo "== $(date -u +%FT%TZ) Hourly RAP/RTMA/URMA/MRMS verification =="
   "$PYTHON_BIN" "$BASE_DIR/multi_model_to_zarr_wcoss2.py" \
     --verification-only "${EXTRA_COMMON[@]}" \
     --lookback-hours "$VERIFY_LOOKBACK_HOURS" --mrms-stride "$MRMS_STRIDE" || FAILED=1

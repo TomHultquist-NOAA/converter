@@ -3,11 +3,12 @@
   "retention_days": 7,
   "mrms_hourly_sample_tolerance_minutes": 8,
   "source_delays_minutes": {
-    "rap": 120,
+    "rap": 65,
     "urma": 450,
-    "mrms_refc": 25,
-    "mrms_prate": 25,
-    "mrms_apcp": 90
+    "mrms_refc": 10,
+    "mrms_prate": 10,
+    "mrms_apcp": 10,
+    "rtma": 60
   },
   "field_sources": {
     "ptype": null,
@@ -104,6 +105,32 @@
         null,
         null
       ]
+    },
+    "rtma": {
+      "t2m": [
+        "TMP",
+        "2 m above ground"
+      ],
+      "dpt2m": [
+        "DPT",
+        "2 m above ground"
+      ],
+      "u10": [
+        "UGRD",
+        "10 m above ground"
+      ],
+      "v10": [
+        "VGRD",
+        "10 m above ground"
+      ],
+      "gust10": [
+        "GUST",
+        "10 m above ground"
+      ],
+      "wspd10": [
+        "WIND",
+        "10 m above ground"
+      ]
     }
   },
   "mrms_products": {
@@ -131,6 +158,38 @@
       "threshold_m": 0.01,
       "units": "binary 0/1",
       "note": "Provisional snow-presence proxy, not fractional snow-cover percentage. Preserve this distinction in plot labels."
+    },
+    "rh2m_rtma": {
+      "source": "rtma",
+      "inputs": [
+        "t2m",
+        "dpt2m"
+      ],
+      "method": "relative_humidity_from_temperature_and_dewpoint",
+      "units": "percent",
+      "note": "Derived from URMA T and Td (K); choose saturation convention explicitly at Zarr conversion."
     }
+  },
+  "fallback_field_sources": {
+    "t2m": [
+      "urma",
+      "rtma"
+    ],
+    "dpt2m": [
+      "urma",
+      "rtma"
+    ],
+    "rh2m": [
+      "urma",
+      "rtma"
+    ],
+    "wspd10": [
+      "urma",
+      "rtma"
+    ],
+    "gust10": [
+      "urma",
+      "rtma"
+    ]
   }
 }

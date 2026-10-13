@@ -1,10 +1,10 @@
 # OMD EVU Unified Model and Verification Converter
 
-**Version 6.3.2 — WCOSS2 operational source**
+**Version 6.4 — WCOSS2 operational source**
 
 Downloads operational forecast and verification GRIB2 products, converts selected fields to browser-readable Zarr v2, generates catalogs, and publishes the results to the OMD EVU Model Viewer web server. The pipeline uses Python 3.10+ (standard library only) and an existing `wgrib2` executable; it does not require installing packages on WCOSS2.
 
-**One hourly cron job** handles both workflows: RAP, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **7-day retention** policy. A shared `flock` lock prevents concurrent cron runs.
+**One hourly cron job** handles both workflows: RAP, RTMA, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **7-day retention** policy. A shared `flock` lock prevents concurrent cron runs.
 
 ## Repository contents
 
@@ -15,7 +15,7 @@ Downloads operational forecast and verification GRIB2 products, converts selecte
 | `converter_cron_env.sh` | Loads a captured WCOSS2 runtime in cron | **Required for cron** |
 | `capture_converter_runtime.sh` | Creates the local runtime configuration from a working interactive shell | **Required for initial setup / changes** |
 | `verification_pipeline.py` | Hourly verification orchestration and publishing decisions | **Required** |
-| `verification_ingest.py` | Download and extraction of RAP, URMA, MRMS GRIB2 | **Required** |
+| `verification_ingest.py` | Download and extraction of RAP, RTMA, URMA, MRMS GRIB2 | **Required** |
 | `verification_convert.py` | Zarr conversion and derived verification fields | **Required** |
 | `verification_sources.json` | Analysis field mappings and latency settings | **Required** |
 | `repair_analysis_access.py` | Optional, read-only-by-default fix for previously published Analysis Zarr permissions | **Maintenance utility** |
@@ -29,14 +29,17 @@ Keep these files together in the processing directory so Python can import the v
 | Dataset | Available forecast / analysis hours |
 | --- | --- |
 | RRFS | F000–F084 |
-| REFS mean | F001–F060 |
+| REFS mean | F001–F060; categorical weighted-mean rain/freezing rain/ice pellets/snow, REFC from PMMN, interval-aware WEASD and ASNOW |
 | REFS members m001–m005 | F000–F060 |
 | HRRR | F000–F048 |
 | MRMS | Hourly verification: composite reflectivity, precipitation rate, one-hour QPE |
-| URMA | Hourly verification: 2-m temperature/dewpoint, 10-m wind/gust, derived 2-m RH |
+| URMA | Preferred hourly verification: 2-m temperature/dewpoint, 10-m wind/gust, derived 2-m RH |
+| RTMA | Preliminary fallback for the same five fields while URMA is delayed |
 | RAP | Hourly F000 analysis: snow depth, SWE, 925-/850-/700-hPa temperature, derived snow-presence mask |
 
-MRMS conversion uses **native stride 1** (no spatial decimation). RAP snow presence is a binary proxy derived from depth, *not* fractional snow-cover percentage. Verification is indexed by **valid UTC hour**, with source-specific publication delays set in `verification_sources.json`. Data not yet published by a source are retried during subsequent hourly runs; no older hour is substituted.
+REFS mean categorical fields are **ensemble-weighted means**, not deterministic category flags. The unidentified local parameter (GRIB discipline 0/category 6/parameter 202) is not yet mapped as PTYPE. REFS mean reflectivity comes from the `pmmn` product; the other new fields come from `mean`. Both WEASD and ASNOW carry accumulation intervals, which are converted into run totals only when the necessary earlier-hour totals exist.
+
+MRMS conversion uses **native stride 1** (no spatial decimation). RAP snow presence is a binary proxy derived from depth, *not* fractional snow-cover percentage. Verification is indexed by **valid UTC hour**, with source-specific publication delays set in `verification_sources.json`. For temperature/dewpoint/RH and 10-m wind/gust, the viewer **always prefers URMA to RTMA for an identical valid time**. RTMA is labeled preliminary. Both sources may coexist in the seven-day archive; the viewer makes the replacement automatically by precedence rather than rewriting Zarr stores. Data not yet published by a source are retried during subsequent hourly runs; no older hour is substituted.
 
 Output includes model-specific catalogs (`catalog_rrfs.json`, `catalog_refs_m001.json`, etc.) and `catalog_analysis.json` for the viewer's Analysis panel. The existing top-level `catalog.json` is not overwritten by the model publisher.
 
@@ -68,12 +71,53 @@ Expected: `Cron runtime OK: Python=... ; wgrib2=...`.
 Install **one** cron entry and remove any earlier four-times-daily entries for the same converter:
 
 ```cron
-0 * * * * /path/to/zarr_processing/run_multimodel_cron.sh >> /path/to/zarr_processing/cron_errors.log 2>&1
+10 * * * * /path/to/zarr_processing/run_multimodel_cron.sh >> /path/to/zarr_processing/cron_errors.log 2>&1
 ```
 
-The wrapper uses UTC for its model-cycle checks and handles verification first. At 04/10/16/22 UTC it processes the newest eligible model initialization cycle and, by default, the preceding cycle (`CATCHUP_CYCLES=1`). An invocation that encounters an active shared lock skips rather than overlapping work. A full seven-day automatic model backfill is **not** implemented; recover older missed cycles explicitly as needed.
+The sample cron runs at **HH+10 UTC**, as in the current deployment. Its verification pass checks current-hour MRMS reflectivity/rate (initial 10-minute delay) and previous-hour RAP F000 and RTMA (65/60-minute delays). MRMS one-hour QPE is also attempted at HH+10 but may arrive later; missing files are retried hourly. URMA is checked after 450 minutes. All unavailable products are retried during subsequent hourly runs. Model production remains at UTC hours 04, 10, 16, 22 even when the cron entry itself fires ten minutes after each hour. The wrapper handles verification first. At 04/10/16/22 UTC it processes the newest eligible model initialization cycle and, by default, the preceding cycle (`CATCHUP_CYCLES=1`). An invocation that encounters an active shared lock skips rather than overlapping work. A full seven-day automatic model backfill is **not** implemented; recover older missed cycles explicitly as needed.
 
 Common optional settings: `WORKERS=8`, `RETENTION_DAYS=7`, `CYCLE_LAG_HOURS=3.5`, `CATCHUP_CYCLES=1`, `VERIFY_LOOKBACK_HOURS=20`, `MRMS_STRIDE=1`, `MODELS=all`, `NO_PUBLISH=1` (test), `PUBLISH_HOST`, and `PUBLISH_DIR`.
+
+## Verification latency and source precedence
+
+Configured initial availability delays (minutes after the analysis valid hour):
+
+| Source/product | Delay |
+| --- | ---: |
+| MRMS composite reflectivity and precipitation rate | 10 |
+| MRMS 1-hour QPE | 10 (availability must be tested) |
+| RAP F000 | 65 |
+| RTMA | 60 |
+| URMA | 450 |
+
+These values are **initial eligibility thresholds**, not publication guarantees. The hourly job retries sources that have not arrived. Check `verification_sources.json` when actual latency differs. At HH+10, the current hour is eligible only for the near-real-time MRMS products; the previous hour is eligible for RAP and RTMA. RTMA takes over only for exact-hour URMA fields that have not yet been published.
+
+## REFS mean backfill
+
+The regular processing path now downloads `mean` and `pmmn` and ingests the new fields for new cycles. Repair already completed local REFS mean stores without overwriting existing chunks:
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date 20261013 --cycle 00 --models refs_mean --hours 1-8 \
+  --repair-refs-mean --workers 2 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work" --no-publish
+```
+
+Inspect the catalog and store, then use `--publish-only` for the same date/cycle to upload the repaired store and catalog. Omit `--hours` to check F001–F060; `--repair-refs-mean` skips fields and hours already present. Do not overlap a manual repair with cron: use the same `.multisource_cron.lock` lock or temporarily disable the cron job.
+
+Note: a record such as `3-4 hour acc` is an **interval** amount. WEASD/ASNOW can be shown as run-total accumulations only if all prior necessary intervals exist. A missing total must remain unavailable, not be mislabeled as cumulative.
+
+## First RTMA validation
+
+Before installing the new converter into live cron, test a short period in your working WCOSS2 shell:
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py --verification-only \
+  --source rtma --lookback-hours 4 --no-publish \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
+```
+
+After a successful local conversion, re-run without `--no-publish` and test the viewer for a valid time when URMA is not yet due; then confirm that a later URMA file takes precedence. Test mean F004 and PMMN F008 inventory selection using `--inventory-only` if needed. Both tests depend on WCOSS2's live public S3 access.
 
 ## Manual processing and recovery
 

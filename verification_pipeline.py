@@ -239,7 +239,7 @@ def main(argv=None, *, publish_store, validate_publisher, default_publish_host=N
     p.add_argument('--output-root',required=True)
     p.add_argument('--work-root',required=True)
     p.add_argument('--config',type=Path,default=Path(__file__).with_name('verification_sources.json'))
-    p.add_argument('--source',choices=('all','rap','urma','mrms'),default='all')
+    p.add_argument('--source',choices=('all','rap','urma','rtma','mrms'),default='all')
     p.add_argument('--wgrib2',default=shutil.which('wgrib2'))
     p.add_argument('--lookback-hours',type=int,default=20)
     p.add_argument('--mrms-stride',type=int,default=1)

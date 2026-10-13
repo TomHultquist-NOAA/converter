@@ -23,7 +23,7 @@ import zlib
 
 LOG=logging.getLogger('verify-convert')
 UTC=timezone.utc
-STAGED_PRODUCTS=['mrms_refc','mrms_prate','mrms_apcp','urma','rap_surface','rap_pressure']
+STAGED_PRODUCTS=['mrms_refc','mrms_prate','mrms_apcp','urma','rtma','rap_surface','rap_pressure']
 FIELD_UNITS={'refc':'dBZ','prate':'kg m-2 s-1','apcp':'kg m-2','t2m':'K','dpt2m':'K',
              'rh2m':'%','wspd10':'m s-1','gust':'m s-1','u10':'m s-1','v10':'m s-1',
              'weasd':'kg m-2','snod':'m','snowpresence':'1','t925':'K','t850':'K','t700':'K'}
@@ -186,7 +186,7 @@ def process_manifest(manifest,staging,outroot,wgrib2,level,stride,force=False,in
     vals=convert_units(name,srcname,vals)
     vals,_,_=stride_array(vals,nx,ny,stride if srcname.startswith('mrms') else 1)
     allfields[name]=vals
-  if srcname=='urma' and 't2m' in allfields and 'dpt2m' in allfields:
+  if srcname in ('urma','rtma') and 't2m' in allfields and 'dpt2m' in allfields:
    allfields['rh2m']=derive_rh(allfields['t2m'],allfields['dpt2m'])
   if srcname=='rap_surface' and 'snod' in allfields:
    allfields['snowpresence']=derive_snowpresence(allfields['snod'])

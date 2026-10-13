@@ -869,7 +869,7 @@ HRRR_ROOT = 'https://noaa-hrrr-bdp-pds.s3.amazonaws.com'
 MODELS = ('rrfs', 'refs_mean', 'refs_m001', 'refs_m002', 'refs_m003', 'refs_m004', 'refs_m005', 'hrrr')
 PRODUCTS = {
     'rrfs': ('2dfld', 'prslev'),
-    'refs_mean': ('mean',),
+    'refs_mean': ('mean','pmmn'),
     'refs_member': ('2dfldnomads', 'prslevnomads'),
     'hrrr': ('wrfsfc', 'wrfprs'),
 }
@@ -886,7 +886,7 @@ FIELDS.update({
 })
 # Accumulated fields are processed carefully: nonzero-start interval amounts
 # must be added to a prior total before appearing as cumulative in the viewer.
-ACCUMULATIONS = {'apcp', 'frozr', 'frzr', 'tsnowp', 'asnow'}
+ACCUMULATIONS = {'apcp', 'frozr', 'frzr', 'tsnowp', 'asnow', 'weasd'}
 ACC_RANGE = re.compile(r'(?<!\d)(\d+)\s*-\s*(\d+)\s*(?:hour|hr)\s+acc', re.I)
 ACC_LENGTH = re.compile(r'(?<!\d)(\d+)\s*(?:hour|hr)\s+acc', re.I)
 STORES_RE = re.compile(r'^(rrfs|refs_mean|refs_m00[1-5]|hrrr)_(\d{8})_(00|06|12|18)00\.zarr$')
@@ -908,7 +908,7 @@ def file_urls(model, date, cycle, fhr, product):
         fname = f'rrfs.t{cycle}z.{product}.3km.f{fhr:03d}.conus.grib2'
     elif model == 'refs_mean':
         prefix = f'{SOURCE_ROOT}/refs.{date}/{cycle}/ensprod/'
-        fname = f'refs.t{cycle}z.mean.f{fhr:02d}.conus.grib2'
+        fname = f'refs.t{cycle}z.{product}.f{fhr:02d}.conus.grib2'
     elif model.startswith('refs_m'):
         member = model.split('_', 1)[1]
         prefix = f'{SOURCE_ROOT}/rrfsens.{date}/{cycle}/{member}/'
@@ -1008,7 +1008,10 @@ def init_store(store, model, date, cycle, level):
                           'long_name': ('Magnitude of ensemble-mean 10-m wind vector (not mean scalar wind speed)'
                                         if model == 'refs_mean' and name == 'wspd10'
                                         else info['long_name']), 'units': info['units'],
-                          'GRIB_shortName': info['short'], 'GRIB_level': info['level']}, level)
+                          'GRIB_shortName': info['short'], 'GRIB_level': info['level'],
+                          **({'ensemble_mean_fraction': True,
+                              'long_name': 'Weighted ensemble-mean '+info['long_name'].lower()+' (not a deterministic category)'}
+                             if model=='refs_mean' and name in core.PTYPE_INPUTS else {})}, level)
     if model != 'refs_mean':
         core.ensure_array(store, 'ptype', (length, core.NY, core.NX),
                           (1, core.NY, core.NX), '|u1', 0,
@@ -1070,6 +1073,7 @@ def process_job(args):
     """Runs in a child process. Writes only hour-unique files; no shared metadata."""
     model, date, cycle, fhr, store_str, work_str, wgrib2, level, timeout, retries, insecure, keep_grib, strict = args[:13]
     repair_fields = tuple(args[13]) if len(args) > 13 and args[13] else None
+    repair_kind = args[14] if len(args)>14 else None
     store = Path(store_str)
     # Cycle-scoped temporary GRIB directory: safe to expire by init time.
     work = Path(work_str) / model / f'{date}_{cycle}' / f'f{fhr:03d}'
@@ -1091,7 +1095,7 @@ def process_job(args):
             if repair_fields is None:
                 (store / name / f'{fhr}.0.0').unlink(missing_ok=True)
                 (store / '.accum_intervals' / name / f'{fhr}.zlib').unlink(missing_ok=True)
-        for product in (('prslevnomads',) if repair_fields else PRODUCTS[family(model)]):
+        for product in ((('prslevnomads',) if repair_kind=='pressure' else PRODUCTS[family(model)]) if repair_fields else PRODUCTS[family(model)]):
             url, idxurl = file_urls(model, date, cycle, fhr, product)
             try:
                 # The index is authoritative for which records actually exist.
@@ -1110,9 +1114,11 @@ def process_job(args):
         for name in FIELDS:
             if repair_fields is not None and name not in repair_fields:
                 continue
-            if name == 'wspd10' or (model == 'refs_mean' and name in core.PTYPE_INPUTS):
+            if name == 'wspd10':
                 continue
             for product, (_, _, rows) in inventory.items():
+                if model=='refs_mean' and name=='refc' and product!='pmmn':
+                    continue
                 rec = choose_field(rows, name, fhr)
                 if rec is not None:
                     interval = parse_acc_interval(rec['text'], fhr) if name in ACCUMULATIONS else None
@@ -1185,7 +1191,7 @@ def process_job(args):
         return {'model':model,'fhr':fhr,'fields':sorted(chosen),'selections':selections,
                 'pending':pending,'products':product_info,'status':'complete',
                 'missing_products': missing_products,'count':count,
-                'repair_only': bool(repair_fields)}
+                'repair_only': bool(repair_fields), 'repair_kind': repair_kind}
     except Exception as exc:
         return {'model':model,'fhr':fhr,'status':'failed','error':str(exc),
                 'fields':sorted(chosen),'pending':pending}
@@ -1691,6 +1697,8 @@ def arguments(argv=None):
     p.add_argument('--overwrite-hours',action='store_true')
     p.add_argument('--repair-refs-pressure',action='store_true',
                    help='Safely add missing t925/t850/t700 REFS-member fields to already processed hours, retaining existing fields')
+    p.add_argument('--repair-refs-mean',action='store_true',
+                   help='Safely add missing REFS mean categorical fields, REFC from PMMN, WEASD and ASNOW to completed forecast hours')
     p.add_argument('--strict-fields',action='store_true',help='Fail if an hour has no supported fields')
     p.add_argument('--no-publish',action='store_true',help='Do not SCP/SSH to RZDM')
     p.add_argument('--inventory-only',action='store_true',help='Inspect GRIB .idx files only; no downloads, Zarr output or publishing (default: first hour per model)')
@@ -1718,7 +1726,9 @@ def arguments(argv=None):
             a.hours=core.parse_hours(a.hours)
         if not 1<=a.workers<=20:
             raise ValueError('--workers must be 1-20')
-        if a.repair_refs_pressure and (a.overwrite_hours or a.inventory_only or a.catalog_only or a.publish_only):
+        if a.repair_refs_pressure and a.repair_refs_mean:
+            raise ValueError('Select only one REFS repair mode')
+        if (a.repair_refs_pressure or a.repair_refs_mean) and (a.overwrite_hours or a.inventory_only or a.catalog_only or a.publish_only):
             raise ValueError('--repair-refs-pressure cannot be combined with overwrite/inventory/catalog/publish-only')
         if a.inventory_only and (a.catalog_only or a.publish_only or a.overwrite_hours):
             raise ValueError('--inventory-only cannot be combined with catalog-only, publish-only, or overwrite-hours')
@@ -1767,7 +1777,7 @@ def inspect_inventories(a):
                     print(f'[{model} F{fhr:03d} {product}] ERROR: {exc}',flush=True)
             matches={}
             for name in FIELDS:
-                if name=='wspd10' or (model=='refs_mean' and name in core.PTYPE_INPUTS):
+                if name=='wspd10':
                     continue
                 for product,rows in inventories.items():
                     r=choose_field(rows,name,fhr)
@@ -1819,6 +1829,8 @@ def main(argv=None):
     for model in a.models:
         if a.repair_refs_pressure and not model.startswith('refs_m'):
             continue
+        if a.repair_refs_mean and model!='refs_mean':
+            continue
         lo,hi=hour_bounds(model)
         hours=range(lo,hi+1) if a.hours is None else [h for h in a.hours if lo<=h<=hi]
         if not hours:
@@ -1829,6 +1841,14 @@ def main(argv=None):
         if a.catalog_only or a.publish_only:
             continue
         init_store(store,model,a.date,a.cycle,a.compression_level)
+        if model=='refs_mean':
+            for cname in core.PTYPE_INPUTS:
+                attrs_path=store/cname/'.zattrs'
+                if attrs_path.exists():
+                    attrs=json.loads(attrs_path.read_text())
+                    attrs['ensemble_mean_fraction']=True
+                    attrs['long_name']='Weighted ensemble-mean '+FIELDS[cname]['long_name'].lower()+' (not a deterministic category)'
+                    core.json_write(attrs_path,attrs)
         flags=read_processed(store,hi+1)
         processed[model]=flags
         manifest_path=out/f'{store.stem}.selection.json'
@@ -1847,6 +1867,14 @@ def main(argv=None):
                                       if not (store/name/f'{h}.0.0').is_file())
                 if not repair_fields:
                     continue
+            elif a.repair_refs_mean:
+                if not flags[h]:
+                    continue
+                repair_fields=tuple(name for name in ('refc','crain','cfrzr','cicep','csnow','weasd','asnow')
+                                    if not (store/name/f'{h}.0.0').is_file()
+                                    and not (store/'.accum_intervals'/name/f'{h}.zlib').is_file())
+                if not repair_fields:
+                    continue
             else:
                 if flags[h] and not a.overwrite_hours:
                     logging.info('%s F%03d already processed; skipping',model,h)
@@ -1856,7 +1884,7 @@ def main(argv=None):
                     write_processed(store,flags,a.compression_level)
             jobs.append((model,a.date,a.cycle,h,str(store),str(work),wgrib2,
                          a.compression_level,a.timeout,a.retries,a.insecure,a.keep_grib,a.strict_fields,
-                         repair_fields))
+                         repair_fields, 'pressure' if a.repair_refs_pressure else 'mean' if a.repair_refs_mean else None))
     failed=[]
     unavailable=[]
     incomplete_products=[]
@@ -1884,7 +1912,7 @@ def main(argv=None):
                         combined['fields']=sorted(set(previous.get('fields',[])) | set(result['fields']))
                         for key in ('selections','products'):
                             combined[key]={**previous.get(key,{}),**result.get(key,{})}
-                        combined['repair_pressure_added']=result['fields']
+                        combined['repair_'+result.get('repair_kind','fields')+'_added']=result['fields']
                         manifests[model]['forecast_hours'][f'{h:03d}']=combined
                     else:
                         manifests[model]['forecast_hours'][f'{h:03d}']=result

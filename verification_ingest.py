@@ -29,6 +29,7 @@ UTC=dt.timezone.utc
 BUCKETS={
     'rap':'https://noaa-rap-pds.s3.amazonaws.com',
     'urma':'https://noaa-urma-pds.s3.amazonaws.com',
+    'rtma':'https://noaa-rtma-pds.s3.amazonaws.com',
     'mrms':'https://noaa-mrms-pds.s3.amazonaws.com',
 }
 LOG=logging.getLogger('evu-verify')
@@ -178,6 +179,7 @@ def jobs_for(t,cfg):
       ('rap_surface',f"{BUCKETS['rap']}/rap.{d}/rap.t{h}z.awp130bgrbf00.grib2",'rap'),
       ('rap_pressure',f"{BUCKETS['rap']}/rap.{d}/rap.t{h}z.awp130pgrbf00.grib2",'rap'),
       ('urma',f"{BUCKETS['urma']}/urma2p5.{d}/urma2p5.t{h}z.2dvaranl_ndfd.grb2_wexp",'urma'),
+      ('rtma',f"{BUCKETS['rtma']}/rtma2p5.{d}/rtma2p5.t{h}z.2dvaranl_ndfd.grb2_wexp",'rtma'),
       ('mrms_refc',None,'mrms_refc'),('mrms_prate',None,'mrms_prate'),('mrms_apcp',None,'mrms_apcp')]
 
 def valid_now(t,src,now,cfg):
@@ -256,7 +258,7 @@ def process_job(client,wgrib2,root,t,job,config,now,plan=False,force=False,keep_
 def cleanup(root,now,days):
     cutoff=now-dt.timedelta(days=days)
     removed=0
-    for source in ('rap_surface','rap_pressure','urma','mrms_refc','mrms_prate','mrms_apcp'):
+    for source in ('rap_surface','rap_pressure','urma','rtma','mrms_refc','mrms_prate','mrms_apcp'):
         area=root/source
         if not area.exists():continue
         for daydir in area.iterdir():
@@ -276,7 +278,7 @@ def main(argv=None):
     ap.add_argument('--wgrib2',default=os.getenv('WGRIB2') or shutil.which('wgrib2'))
     ap.add_argument('--lookback-hours',type=int,default=14,help='Revisit recent valid hours; catches delayed RAP/URMA')
     ap.add_argument('--backfill-hours',type=int,default=0,help='Override lookback to backfill within retention window')
-    ap.add_argument('--source',choices=['all','rap','urma','mrms'],default='all')
+    ap.add_argument('--source',choices=['all','rap','urma','rtma','mrms'],default='all')
     ap.add_argument('--now',help='Override current UTC hour for tests (YYYYMMDDHH)')
     ap.add_argument('--dry-run',action='store_true')
     ap.add_argument('--force',action='store_true')
