@@ -1,93 +1,180 @@
-# OMD EVU Model Viewer
+# OMD EVU Unified Model and Verification Converter
 
-**Version 7.43.1 · October 13, 2026**
+**Version 6.4 — WCOSS2 operational source**
 
-A browser-based, multi-panel weather-model viewer for the Office of Modeling and Development (OMD), Evaluation and Verification Unit (EVU). It displays forecast fields from hosted Zarr v2 datasets using MapLibre GL JS and autumnplot-gl. Map geography is served from local GeoJSON files; plots are rendered in the browser.
+Downloads operational forecast and verification GRIB2 products, converts selected fields to browser-readable Zarr v2, generates catalogs, and publishes the results to the OMD EVU Model Viewer web server. The pipeline uses Python 3.10+ (standard library only) and an existing `wgrib2` executable; it does not require installing packages on WCOSS2.
 
-## Viewer capabilities
+**One hourly cron job** handles both workflows: RAP, RTMA, URMA, and MRMS are checked every hour, and model cycles are processed at **04, 10, 16, and 22 UTC**. Local and published data are subject to a configurable **7-day retention** policy. A shared `flock` lock prevents concurrent cron runs.
 
-- Compare multiple models and ensemble members in a synchronized grid (default: 3 × 3, configurable up to 20 panels).
-- Select a forecast field, model initialization cycle, and forecast hour; step or animate through available forecast times.
-- Pan and zoom synchronized maps in **2D** or **Globe** mode. Each mode remembers its own center and zoom while the page is open. On mouse-equipped devices, the glowing master cursor uses a native cursor graphic (no animation-frame trailing); matching geographic crosshairs remain synchronized across the other panels.
-- Display local state, country, coastline, lake, and zoom-dependent county boundaries. Expanded panels adjust county visibility to account for their larger geographic viewport, without altering multi-panel thresholds.
-- Use light or dark mode, expand an individual panel, and inspect data under the cursor. On desktop, switch the controls between the top toolbar and a left sidebar (default for new visitors) using the icon beside the theme button; the layout choice is saved in the browser.
-- Save an individual panel or the full comparison as a PNG in **16:9** or **4:3**, with **Fill** or **Fit** framing. Exports prepare the applicable geographic detail before capture.
-- Toggle **Contours** on supported continuous fields (temperature, moisture, winds, precipitation, snow amounts, and reflectivity). Contours are rendered in the current map projection for 2D and Globe views, and included in PNG exports. While panning, zooming, or rotating, the contour overlay is temporarily hidden and no CPU-intensive contour calculations are performed; it redraws at full quality when movement has stopped. Conventional field-specific intervals adapt to map zoom, data range, and panel dimensions; continuous, interpolated paths have readable, rotated, non-overlapping labels even in normal-size panels. Categorical fields have no contour control. The choice is remembered by the browser; contour lines are off by default.
-- Compare **1-hour precipitation** or **accumulated precipitation since the selected model cycle initialization**. The model F001 one-hour amount equals its F001 cumulative total (no F000 file required); at F002 and beyond the one-hour amount is derived from consecutive model running totals; the Analysis panel uses MRMS 1-hour QPE directly or adds consecutive hourly MRMS QPE valid times for the matching cycle-to-date total. Missing MRMS hours prevent displaying an incomplete running total. The MRMS sum is computed on demand in the browser, which can be slow or memory-intensive for long forecast leads at native MRMS grid resolution.
-- Prefetch upcoming forecast data, with bounded browser caches and adaptive network use.
-- Use the viewer on desktop and mobile, including sequential mobile map initialization and WebGL resource recovery.
+## Repository contents
 
-## Desktop control placement
+| File | Role | Needed? |
+| --- | --- | --- |
+| `multi_model_to_zarr_wcoss2.py` | Main model and verification entry point; catalogs, publishing, retention | **Required** |
+| `run_multimodel_cron.sh` | Unified hourly cron launcher, locking, model-cycle selection | **Required for cron** |
+| `converter_cron_env.sh` | Loads a captured WCOSS2 runtime in cron | **Required for cron** |
+| `capture_converter_runtime.sh` | Creates the local runtime configuration from a working interactive shell | **Required for initial setup / changes** |
+| `verification_pipeline.py` | Hourly verification orchestration and publishing decisions | **Required** |
+| `verification_ingest.py` | Download and extraction of RAP, RTMA, URMA, MRMS GRIB2 | **Required** |
+| `verification_convert.py` | Zarr conversion and derived verification fields | **Required** |
+| `verification_sources.json` | Analysis field mappings and latency settings | **Required** |
+| `repair_analysis_access.py` | Optional, read-only-by-default fix for previously published Analysis Zarr permissions | **Maintenance utility** |
+| `.gitignore` | Excludes generated data, runtime paths and operational files from Git | **Recommended** |
+| `README.md` | Setup and operations documentation | **Recommended** |
 
-On desktop-width browsers (over 800 px), the layout button beside the light/dark switch toggles between **Top** and **Left** (default for first-time visitors). The chosen placement is saved using browser `localStorage` and restored on later visits, overriding the first-visit default. When left placement is selected, the navigation tips, live panel status counts, and autumnplot-gl attribution also move into the sidebar. The left-side controls scroll independently when the window is short. The existing mobile control layout is unaffected and does not display this toggle.
+Keep these files together in the processing directory so Python can import the verification helper modules. The permissions-repair utility is not run by cron and can be left out of a minimal **deployment**, but is useful to keep in the source repository for future recovery.
 
-## Default panel arrangement
+## Models and verification sources
 
-| | Column 1 | Column 2 | Column 3 |
-| --- | --- | --- | --- |
-| **Row 1** | RRFS | HRRR | REFS-1 |
-| **Row 2** | REFS-2 | REFS-3 | REFS-4 |
-| **Row 3** | REFS-5 | REFS-mean | Analysis (verification) |
-
-The Analysis panel uses valid-time-matched verification fields from `data/catalog_analysis.json`. For common near-surface fields, it uses preliminary RTMA while the corresponding URMA valid hour is not yet available, and automatically prefers URMA when both are present. It labels RTMA explicitly as preliminary. REFS mean categorical fields are displayed as continuous weighted-mean fractions rather than binary flags. Missing or delayed verifying data is identified in the panel; it is not replaced by an older hour. MRMS is ingested at full native resolution (stride 1) by default, which requires more memory and bandwidth. The **Accumulated precipitation** Analysis panel is computed from *1-hour MRMS QPE ending at hours F001…Fxxx*, excluding the initialization hour itself; it is comparable to cycle-to-date model totals, not an arbitrary UTC-day accumulation. If any hourly QPE is absent, the Analysis panel explicitly reports the missing input and does not show a misleading partial sum. MRMS backfills become available on page reload after the verification catalog updates.
-
-## Deployment and updates
-
-1. Copy the ZIP contents **directly into the web viewer directory**, retaining the included directory structure. There should be no additional enclosing folder.
-2. **Preserve `vendor/`**, including the MapLibre CSP worker and autumnplot-gl distribution. On a new installation, use `vendor_dependencies.py` to obtain the required third-party files.
-3. **Preserve operational data** in `data/`: `catalog*.json` and referenced `.zarr` directories. Those are provided by the separate GRIB2-to-Zarr processing and publishing workflow, not by this ZIP.
-4. Back up any locally customized `config.json` and merge settings as appropriate before replacing it.
-5. If upgrading an earlier installation, you can delete the obsolete `build_catalog.py` from the web directory. Extracting a new ZIP does not remove files left by older releases.
-6. Hard-refresh the browser after deployment to avoid cached viewer scripts or styles.
-
-Serve the viewer over HTTP(S) rather than opening `index.html` as a local file. Persistent compressed-data caching requires a browser environment that supports CacheStorage (typically HTTPS or localhost).
-
-## Main files
-
-| Path | Purpose |
+| Dataset | Available forecast / analysis hours |
 | --- | --- |
-| `index.html` | Viewer entry point |
-| `js/viewer.js` | Rendering, navigation, data access, prefetching, and PNG exports |
-| `css/styles.css`, `css/cursor-master-glow.svg` | Responsive layout, visual styling, and the native master-pointer graphic |
-| `config.json` | Model sources, panels, display, cache, and export options |
-| `data/map_*.geojson` | Geographic boundaries and fills |
-| `diagnostics.html` | WebGL, MapLibre, worker, and multi-panel diagnostics |
-| `vendor_dependencies.py` | Third-party browser library setup helper |
+| RRFS | F000–F084 |
+| REFS mean | F001–F060; categorical weighted-mean rain/freezing rain/ice pellets/snow, REFC from PMMN, interval-aware WEASD and ASNOW |
+| REFS members m001–m005 | F000–F060 |
+| HRRR | F000–F048 |
+| MRMS | Hourly verification: composite reflectivity, precipitation rate, one-hour QPE |
+| URMA | Preferred hourly verification: 2-m temperature/dewpoint, 10-m wind/gust, derived 2-m RH |
+| RTMA | Preliminary fallback for the same five fields while URMA is delayed |
+| RAP | Hourly F000 analysis: snow depth, SWE, 925-/850-/700-hPa temperature, derived snow-presence mask |
 
-The verification acquisition, conversion, and publishing scripts are distributed separately from the web viewer. No WCOSS2 converter update is needed for v7.43; both MRMS precipitation modes use the already published native-hourly `mrms_apcp` Zarr stores. A future server-side prefix-sum product could accelerate very long lead-time totals.
+REFS mean categorical fields are **ensemble-weighted means**, not deterministic category flags. The unidentified local parameter (GRIB discipline 0/category 6/parameter 202) is not yet mapped as PTYPE. REFS mean reflectivity comes from the `pmmn` product; the other new fields come from `mean`. Both WEASD and ASNOW carry accumulation intervals, which are converted into run totals only when the necessary earlier-hour totals exist.
 
-## Configuration
+MRMS conversion uses **native stride 1** (no spatial decimation). RAP snow presence is a binary proxy derived from depth, *not* fractional snow-cover percentage. Verification is indexed by **valid UTC hour**, with source-specific publication delays set in `verification_sources.json`. For temperature/dewpoint/RH and 10-m wind/gust, the viewer **always prefers URMA to RTMA for an identical valid time**. RTMA is labeled preliminary. Both sources may coexist in the seven-day archive; the viewer makes the replacement automatically by precedence rather than rewriting Zarr stores. Data not yet published by a source are retried during subsequent hourly runs; no older hour is substituted.
 
-Edit `config.json` to change model catalog locations, panel order, default field, map options, and resource limits. Frequently useful settings under `display` include:
+Output includes model-specific catalogs (`catalog_rrfs.json`, `catalog_refs_m001.json`, etc.) and `catalog_analysis.json` for the viewer's Analysis panel. The existing top-level `catalog.json` is not overwritten by the model publisher.
 
-| Setting | Purpose |
-| --- | --- |
-| `maxActiveMaps` | Maximum active MapLibre maps (default 9) |
-| `countyMinZoom` / `globeCountyMinZoom` | County visibility thresholds in 2D / Globe (4.25 / 4.30) |
-| `countyPreloadLeadZoom` | Preload county geography ahead of visibility (0.35) |
-| Expanded panel county threshold | Automatically delays county boundaries based on enlarged viewport area; normal panel zoom thresholds remain unchanged |
-| `prefetchHours` | Forecast hours to consider for ahead-of-time downloading (24) |
-| `prefetchDiskCacheMB` | Target compressed browser cache budget (512 MB) |
-| `exportPanelWidth` / `exportAllWidth` | Output PNG widths for 16:9 exports (1920 / 2560 pixels) |
+## Initial setup on WCOSS2
 
-The available fields, runs, and hours are determined by the published model catalogs. Model data may legitimately be unavailable for some selections.
+Install or update the source files in the existing `zarr_processing` directory. Preserve your existing `zarr/`, `work/`, `logs/`, SSH setup, and any local configuration. The included cron wrapper has **site-specific directory and RZDM destination defaults**; review them when deploying anywhere other than the established WCOSS2 installation.
 
-## Troubleshooting
+From an **interactive shell with a known-working Python and wgrib2 environment**:
 
-- **A precipitation comparison is missing:** Verify the hourly MRMS QPE analysis catalog includes every valid hour from F001 through the selected F-hour. For model 1-hour values at F002 or later, both the current and previous cumulative forecast hours must exist. At F001, only the F001 accumulation is needed; F000 does not need to be published. Long accumulated MRMS periods can require substantial browser downloads.
-- **A panel has no data:** Check the relevant `data/catalog_*.json`, its referenced Zarr paths, and the selected cycle/hour. An explicit `run=` URL parameter can pin an older cycle.
-- **Map or GPU initialization fails:** Open `diagnostics.html`, then verify the MapLibre CSP worker, autumnplot-gl worker assets, and browser WebGL support.
-- **Mobile maps load slowly:** Allow sequential initialization to finish. Reducing active maps in `config.json` may help on memory-constrained devices.
-- **PNG geography is unexpectedly incomplete:** Confirm that the `data/map_*.geojson` files are accessible and inspect browser network errors. The exporter loads the geographic layers required at the current zoom before capturing.
+```bash
+cd /path/to/zarr_processing
+chmod 750 run_multimodel_cron.sh capture_converter_runtime.sh
+./capture_converter_runtime.sh
+```
 
-**Rendering libraries:** [autumnplot-gl](https://github.com/tsupinie/autumnplot-gl) and MapLibre GL JS.
+This writes `converter_runtime_paths.sh` locally. **Do not commit or share it.** It captures executable/library paths for cron; the cron wrapper does not need to load WCOSS2 modules or source `.bashrc`. A clean `wgrib2 -version` response is accepted even if that particular command returns a nonzero status (as observed with WCOSS2 3.8.0).
 
-## Full Analysis rendering errors
+Test the environment without running any processing:
 
-If an Analysis panel reports a rendering error, tap or click its message.
-The complete error, field, catalog dataset, grid type, array dimensions,
-and Zarr store are shown in an alert and copied to the clipboard where
-clipboard permissions allow it. This diagnostics enhancement does not change
-meteorological data or map-grid interpretation.
+```bash
+env -i HOME="$HOME" PATH=/usr/bin:/bin CHECK_ENV_ONLY=1 \
+  /bin/bash ./run_multimodel_cron.sh
+```
 
-**REFS mean sources:** CRAIN/CFRZR/CICEP/CSNOW, ASNOW and WEASD are from `mean` GRIB files; composite reflectivity is from the `pmmn` GRIB product. An unidentified local GRIB field is not presented as PTYPE until its meaning is verified.
+Expected: `Cron runtime OK: Python=... ; wgrib2=...`.
+
+## Scheduling
+
+Install **one** cron entry and remove any earlier four-times-daily entries for the same converter:
+
+```cron
+10 * * * * /path/to/zarr_processing/run_multimodel_cron.sh >> /path/to/zarr_processing/cron_errors.log 2>&1
+```
+
+The sample cron runs at **HH+10 UTC**, as in the current deployment. Its verification pass checks current-hour MRMS reflectivity/rate (initial 10-minute delay) and previous-hour RAP F000 and RTMA (65/60-minute delays). MRMS one-hour QPE is also attempted at HH+10 but may arrive later; missing files are retried hourly. URMA is checked after 450 minutes. All unavailable products are retried during subsequent hourly runs. Model production remains at UTC hours 04, 10, 16, 22 even when the cron entry itself fires ten minutes after each hour. The wrapper handles verification first. At 04/10/16/22 UTC it processes the newest eligible model initialization cycle and, by default, the preceding cycle (`CATCHUP_CYCLES=1`). An invocation that encounters an active shared lock skips rather than overlapping work. A full seven-day automatic model backfill is **not** implemented; recover older missed cycles explicitly as needed.
+
+Common optional settings: `WORKERS=8`, `RETENTION_DAYS=7`, `CYCLE_LAG_HOURS=3.5`, `CATCHUP_CYCLES=1`, `VERIFY_LOOKBACK_HOURS=20`, `MRMS_STRIDE=1`, `MODELS=all`, `NO_PUBLISH=1` (test), `PUBLISH_HOST`, and `PUBLISH_DIR`.
+
+## Verification latency and source precedence
+
+Configured initial availability delays (minutes after the analysis valid hour):
+
+| Source/product | Delay |
+| --- | ---: |
+| MRMS composite reflectivity and precipitation rate | 10 |
+| MRMS 1-hour QPE | 10 (availability must be tested) |
+| RAP F000 | 65 |
+| RTMA | 60 |
+| URMA | 450 |
+
+These values are **initial eligibility thresholds**, not publication guarantees. The hourly job retries sources that have not arrived. Check `verification_sources.json` when actual latency differs. At HH+10, the current hour is eligible only for the near-real-time MRMS products; the previous hour is eligible for RAP and RTMA. RTMA takes over only for exact-hour URMA fields that have not yet been published.
+
+## REFS mean backfill
+
+The regular processing path now downloads `mean` and `pmmn` and ingests the new fields for new cycles. Repair already completed local REFS mean stores without overwriting existing chunks:
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date 20261013 --cycle 00 --models refs_mean --hours 1-8 \
+  --repair-refs-mean --workers 2 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work" --no-publish
+```
+
+Inspect the catalog and store, then use `--publish-only` for the same date/cycle to upload the repaired store and catalog. Omit `--hours` to check F001–F060; `--repair-refs-mean` skips fields and hours already present. Do not overlap a manual repair with cron: use the same `.multisource_cron.lock` lock or temporarily disable the cron job.
+
+Note: a record such as `3-4 hour acc` is an **interval** amount. WEASD/ASNOW can be shown as run-total accumulations only if all prior necessary intervals exist. A missing total must remain unavailable, not be mislabeled as cumulative.
+
+## First RTMA validation
+
+Before installing the new converter into live cron, test a short period in your working WCOSS2 shell:
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py --verification-only \
+  --source rtma --lookback-hours 4 --no-publish \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
+```
+
+After a successful local conversion, re-run without `--no-publish` and test the viewer for a valid time when URMA is not yet due; then confirm that a later URMA file takes precedence. Test mean F004 and PMMN F008 inventory selection using `--inventory-only` if needed. Both tests depend on WCOSS2's live public S3 access.
+
+## Manual processing and recovery
+
+Run from the `zarr_processing` directory in your working WCOSS2 environment. Set `OMP_NUM_THREADS=1` and `OMP_THREAD_LIMIT=1` to avoid excessive OpenMP threading in wgrib2.
+
+**Verification download, conversion, and publishing (all sources):**
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py --verification-only \
+  --output-root "$PWD/zarr" --work-root "$PWD/work" \
+  --lookback-hours 20 --mrms-stride 1
+```
+
+Add `--no-publish` to test locally without SCP transfer.
+
+**One model cycle (all models):**
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date YYYYMMDD --cycle 18 --models all --workers 4 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
+```
+
+**Repair previously processed REFS member pressure-level temperatures:**
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date YYYYMMDD --cycle 12 \
+  --models refs_m001,refs_m002,refs_m003,refs_m004,refs_m005 \
+  --repair-refs-pressure --workers 4 \
+  --output-root "$PWD/zarr" --work-root "$PWD/work"
+```
+
+REFS pressure-level temperature uses the separate `prslevnomads` product. The repair adds missing `t925`, `t850`, and `t700` fields to previously processed member hours without overwriting unrelated fields. Omit `--no-publish` to transfer the repaired stores. Do not run a manual backfill simultaneously with cron; coordinate via the shared lock or temporarily disable cron.
+
+**Retry publication of an already repaired model cycle:**
+
+```bash
+python3 multi_model_to_zarr_wcoss2.py \
+  --date YYYYMMDD --cycle 12 --models refs_m001 \
+  --publish-only --output-root "$PWD/zarr" --work-root "$PWD/work" \
+  --no-remote-cleanup --no-local-cleanup
+```
+
+Use this after an intermittent SCP/SSH publishing failure (including SSH exit status 255) rather than repeating downloads. Publication of a model store may retransmit its full Zarr archive.
+
+## Logs, access, and retention
+
+- Timestamped cron logs: `logs/multisource_YYYYMMDD_HHMMSS.log`; startup errors: `cron_errors.log`.
+- Verification datasets and catalogs publish beneath the configured RZDM `data/analysis/` tree and `data/catalog_analysis.json`.
+- The publisher sets web-readable permissions for new Analysis stores. If older stores return **HTTP 403**, run `python3 repair_analysis_access.py` to inspect, then `python3 repair_analysis_access.py --apply` only after checking the target host/path. This maintenance utility does not run automatically.
+- Local analysis publishing state (`zarr/.analysis_publish_state.json`) is deliberately excluded from Git. Do not delete it during normal operation.
+- The cleanup policy is seven days for local and remote datasets; confirm available disk space when processing full-resolution MRMS.
+- Live RAP, URMA, and MRMS conversion/publishing and Analysis display have been verified; the repaired REFS member temperatures have also been displayed. The cron environment check passed, but monitor unattended cron execution separately.
+
+## GitHub hygiene
+
+Commit the **source files, JSON configuration, `.gitignore`, and README only**. Keep generated Zarr stores, downloaded GRIB2, temporary archives, logs, processed manifests, and the captured WCOSS2 runtime outside Git. `.gitignore` protects *untracked* files; if any generated file was already committed, untrack it with `git rm --cached <path>` (do not delete your operational copy). Never commit SSH keys, tokens, or passwords.
+
+The current scripts contain installation-specific filesystem paths, an SSH user, and a restricted-site publishing destination as operational defaults. They are **not credentials**, but they will be visible to anyone who can read the GitHub repository. Review those defaults and repository visibility before making this repository public.
