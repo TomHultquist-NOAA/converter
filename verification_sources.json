@@ -1,0 +1,369 @@
+{
+  "schema": "omd-evu-verification-source-map-1",
+  "retention_days": 7,
+  "mrms_hourly_sample_tolerance_minutes": 8,
+  "source_delays_minutes": {
+    "rap": 65,
+    "urma": 450,
+    "mrms_refc": 10,
+    "mrms_prate": 10,
+    "mrms_apcp": 10,
+    "rtma": 60,
+    "nohrsc": 120
+  },
+  "field_sources": {
+    "ptype": null,
+    "refc": "mrms_refc",
+    "csnow": null,
+    "cicep": null,
+    "cfrzr": null,
+    "crain": null,
+    "t2m": "urma",
+    "dpt2m": "urma",
+    "rh2m": "urma",
+    "prate": "mrms_prate",
+    "apcp": "mrms_apcp",
+    "apcp1h": "mrms_apcp",
+    "apcp3h": "mrms_apcp",
+    "apcp6h": "mrms_apcp",
+    "frozr": null,
+    "frzr": null,
+    "tsnowp": null,
+    "asnow": null,
+    "snow1h": null,
+    "snow3h": null,
+    "cpofp": null,
+    "snowc": "rap",
+    "sden": null,
+    "weasd": "rap",
+    "snod": "rap",
+    "t925": "rap",
+    "t850": "rap",
+    "t700": "rap",
+    "wspd10": "urma",
+    "gust10": "urma",
+    "snow6h": "nohrsc_6h",
+    "snow24h": "nohrsc_24h",
+    "snow48h": "nohrsc_24h",
+    "apcp24h": "mrms_apcp",
+    "apcp48h": "mrms_apcp",
+    "mslp": "rap",
+    "h925": "rap",
+    "u925": "rap",
+    "v925": "rap",
+    "h850": "rap",
+    "u850": "rap",
+    "v850": "rap",
+    "h700": "rap",
+    "u700": "rap",
+    "v700": "rap",
+    "h500": "rap",
+    "u500": "rap",
+    "v500": "rap",
+    "absv500": "rap",
+    "shear06": "rap",
+    "srh01": "rap",
+    "srh03": "rap",
+    "sbcape": "rap",
+    "mlcape": "rap",
+    "mucape": "rap",
+    "wspd300": "rap",
+    "h300": "rap",
+    "u300": "rap",
+    "v300": "rap"
+  },
+  "fields": {
+    "urma": {
+      "t2m": [
+        "TMP",
+        "2 m above ground"
+      ],
+      "dpt2m": [
+        "DPT",
+        "2 m above ground"
+      ],
+      "u10": [
+        "UGRD",
+        "10 m above ground"
+      ],
+      "v10": [
+        "VGRD",
+        "10 m above ground"
+      ],
+      "gust10": [
+        "GUST",
+        "10 m above ground"
+      ],
+      "wspd10": [
+        "WIND",
+        "10 m above ground"
+      ]
+    },
+    "rap_surface": {
+      "weasd": [
+        "WEASD",
+        "surface"
+      ],
+      "snod": [
+        "SNOD",
+        "surface"
+      ],
+      "mslp": [
+        "MSLMA",
+        "mean sea level"
+      ]
+    },
+    "rap_pressure": {
+      "t925": [
+        "TMP",
+        "925 mb"
+      ],
+      "t850": [
+        "TMP",
+        "850 mb"
+      ],
+      "t700": [
+        "TMP",
+        "700 mb"
+      ],
+      "h925": [
+        "HGT",
+        "925 mb"
+      ],
+      "u925": [
+        "UGRD",
+        "925 mb"
+      ],
+      "v925": [
+        "VGRD",
+        "925 mb"
+      ],
+      "h850": [
+        "HGT",
+        "850 mb"
+      ],
+      "u850": [
+        "UGRD",
+        "850 mb"
+      ],
+      "v850": [
+        "VGRD",
+        "850 mb"
+      ],
+      "h700": [
+        "HGT",
+        "700 mb"
+      ],
+      "u700": [
+        "UGRD",
+        "700 mb"
+      ],
+      "v700": [
+        "VGRD",
+        "700 mb"
+      ],
+      "h500": [
+        "HGT",
+        "500 mb"
+      ],
+      "u500": [
+        "UGRD",
+        "500 mb"
+      ],
+      "v500": [
+        "VGRD",
+        "500 mb"
+      ],
+      "absv500": [
+        "ABSV",
+        "500 mb"
+      ],
+      "srh01": [
+        "HLCY",
+        "1000-0 m above ground"
+      ],
+      "srh03": [
+        "HLCY",
+        "3000-0 m above ground"
+      ],
+      "shru06": [
+        "VUCSH",
+        "0-6000 m above ground"
+      ],
+      "shrv06": [
+        "VVCSH",
+        "0-6000 m above ground"
+      ],
+      "sbcape": [
+        "CAPE",
+        "surface"
+      ],
+      "mlcape": [
+        "CAPE",
+        "90-0 mb above ground"
+      ],
+      "mucape": [
+        "CAPE",
+        "255-0 mb above ground"
+      ],
+      "h300": [
+        "HGT",
+        "300 mb"
+      ],
+      "u300": [
+        "UGRD",
+        "300 mb"
+      ],
+      "v300": [
+        "VGRD",
+        "300 mb"
+      ]
+    },
+    "mrms_refc": {
+      "refc": [
+        null,
+        null
+      ]
+    },
+    "mrms_prate": {
+      "prate": [
+        null,
+        null
+      ]
+    },
+    "mrms_apcp": {
+      "apcp": [
+        null,
+        null
+      ]
+    },
+    "rtma": {
+      "t2m": [
+        "TMP",
+        "2 m above ground"
+      ],
+      "dpt2m": [
+        "DPT",
+        "2 m above ground"
+      ],
+      "u10": [
+        "UGRD",
+        "10 m above ground"
+      ],
+      "v10": [
+        "VGRD",
+        "10 m above ground"
+      ],
+      "gust10": [
+        "GUST",
+        "10 m above ground"
+      ],
+      "wspd10": [
+        "WIND",
+        "10 m above ground"
+      ]
+    },
+    "nohrsc_6h": {
+      "snow6h": [
+        null,
+        null
+      ]
+    },
+    "nohrsc_24h": {
+      "snow24h": [
+        null,
+        null
+      ]
+    },
+    "nohrsc_48h": {
+      "snow48h": [
+        null,
+        null
+      ]
+    },
+    "nohrsc_72h": {
+      "snow72h": [
+        null,
+        null
+      ]
+    }
+  },
+  "mrms_products": {
+    "mrms_refc": "MergedReflectivityQCComposite_00.50",
+    "mrms_prate": "PrecipRate_00.00",
+    "mrms_apcp": "MultiSensor_QPE_01H_Pass1_00.00"
+  },
+  "derived_at_zarr_stage": {
+    "rh2m": {
+      "source": "urma",
+      "inputs": [
+        "t2m",
+        "dpt2m"
+      ],
+      "method": "relative_humidity_from_temperature_and_dewpoint",
+      "units": "percent",
+      "note": "Derived from URMA T and Td (K); choose saturation convention explicitly at Zarr conversion."
+    },
+    "snowc": {
+      "source": "rap_surface",
+      "inputs": [
+        "snod"
+      ],
+      "method": "binary_snow_presence_from_depth",
+      "threshold_m": 0.01,
+      "units": "binary 0/1",
+      "note": "Provisional snow-presence proxy, not fractional snow-cover percentage. Preserve this distinction in plot labels."
+    },
+    "rh2m_rtma": {
+      "source": "rtma",
+      "inputs": [
+        "t2m",
+        "dpt2m"
+      ],
+      "method": "relative_humidity_from_temperature_and_dewpoint",
+      "units": "percent",
+      "note": "Derived from URMA T and Td (K); choose saturation convention explicitly at Zarr conversion."
+    }
+  },
+  "fallback_field_sources": {
+    "t2m": [
+      "urma",
+      "rtma"
+    ],
+    "dpt2m": [
+      "urma",
+      "rtma"
+    ],
+    "rh2m": [
+      "urma",
+      "rtma"
+    ],
+    "wspd10": [
+      "urma",
+      "rtma"
+    ],
+    "gust10": [
+      "urma",
+      "rtma"
+    ]
+  },
+  "derived_in_viewer": {
+    "apcp24h": {
+      "source": "mrms_apcp",
+      "method": "sum_complete_24_hourly_qpe"
+    },
+    "apcp48h": {
+      "source": "mrms_apcp",
+      "method": "sum_complete_48_hourly_qpe"
+    },
+    "snow48h": {
+      "source": "nohrsc_24h",
+      "method": "sum_two_nonoverlapping_24_hour_analyses",
+      "valid_hours_utc": [
+        0,
+        12
+      ],
+      "min_forecast_lead_hours": 48
+    }
+  }
+}
