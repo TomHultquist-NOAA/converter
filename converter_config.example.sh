@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# OMD EVU Converter v1.4.15 — shared cron and historical-case configuration.
+# OMD EVU Converter v1.4.43 — shared cron and historical-case configuration.
 # This is a starting template for converter_config.sh. Preserve all
 # existing site-specific settings and private credentials when merging it.
 # Worker values are concurrency caps, not strict CPU or memory quotas.
 # The operational example below reflects a 256-logical-CPU / ~277-GiB host;
 # monitor actual RSS and system load because GRIB decoding memory varies.
 
-# Performance monitoring is intentionally OFF while the data flows stabilize.
-# Normal processing/error cron logs remain enabled. To opt in later, set to 1.
+# Performance monitoring is opt-in and OFF in this example.
+# To collect comprehensive regional/GFS/AI/verification reports, set to 1.
+# Normal processing/error cron logs remain enabled regardless.
 # See PERFORMANCE_MONITORING.md for details and cleanup of legacy reports.
 export EVU_PERF_ENABLED=0
 export EVU_PERF_SAMPLE_SECONDS=5

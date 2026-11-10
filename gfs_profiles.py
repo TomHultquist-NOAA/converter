@@ -15,6 +15,7 @@ import re
 import sys
 
 import sounding_profiles as sp
+import perf_monitor
 import multi_model_to_zarr_wcoss2 as mm
 
 PRESSURES=sp.PRESSURES
@@ -175,6 +176,7 @@ def derive_kinematics(profile, map_fields, npts):
     return {k:_bytes(v) for k,v in outputs.items() if any(math.isfinite(x) for x in v)}
 
 
+@perf_monitor.timed_task('gfs_sounding_commit', lambda a,k: '%s %s%s F%03d' % (a[1], a[2], a[3], a[4]))
 def commit(root, model, date, cycle, hour, profile, map_fields, nx,ny,grid,compression):
     """Write independent profile store and completion stamp only after all chunks."""
     if not any(k[0]=='t' and isinstance(k[1],int) for k in profile):

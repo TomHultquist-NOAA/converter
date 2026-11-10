@@ -51,6 +51,9 @@ def merge_policy(policy, day, cycle, models):
         entries.append({'date':day, 'cycle':cycle, 'models':list(models)})
     return {**policy, 'protected_cycles':entries}
 
+import perf_monitor
+
+@perf_monitor.monitored('gfs_historical_case')
 def run(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--date',required=True, help='Cycle initialization UTC YYYYMMDD')

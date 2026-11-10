@@ -1,3 +1,62 @@
+## v1.4.50 — 2026-11-10
+- Default Weather Events headline limit 15; soft ranking de-duplication of nearby same-category events; full candidates remain unchanged.
+
+## v1.4.49 — 2026-11-10
+
+- Expose `recent-cycles` through independent Weather Events cron configuration; remove hard-coded publisher value.
+- Expand the independent scheduled scanner sampling default coherently from F012..F048 (12-hour step, 4 frames) to F006..F072 (6-hour step, 12 frames); selected-highlight cap 20 -> 25.
+- Validate scheduled sampling counts as positive integers and document existing-installation config migration, resource tradeoffs and fallbacks.
+- Preserve all operational converter schedules and resources, scanner meteorological thresholds, historical alert enrichment, publisher safety gates, and viewer outputs.
+
+## v1.4.48 — 2026-11-10
+
+- Experimental Weather Events scene presentation now reserves forecast categories and contributing models before filling intensity-limited slots.
+- Added optional historic IEM VTEC + storm-based watch/warning/advisory correlation, distinct provenance, date/location sampling, and explicit outage/forecast-future statuses. Alert issuance is not verified impact.
+- Added low-priority standalone locked scheduled scanner and guarded atomic JSON publisher for local directory or SSH destination; requires explicit installation and configuration, defaults to preview only. No operational cron or Zarr modifications.
+
+## v1.4.47 — 2026-11-10
+
+- Limit tropical high-CAPE-only **selected highlights** to one by default (configurable `--max-tropical-cape-highlights 0..N`); keep all detections and all candidate-group summaries without changing geographic masks or thresholds.
+- Label CAPE-only situations as high convective instability rather than implying observed convection; identify quota exclusions in candidate summaries.
+- Fix stale scene-omission notes when the full distinct-scene list fits the scene cap. Distinguish forecast scenes from different initializations even when their valid times match.
+- Preserve Python 3.6-compatible standard library, read-only scanning, model data, conversion, cron, publication and retention behavior.
+
+## v1.4.46 — 2026-11-10
+
+- Reject below-ground 850-hPa GFS temperature differences using matching native surface-pressure fields from both model versions; fail closed if a supporting field/hour is absent and report mask coverage diagnostics.
+- Add compact `candidate_group_summaries` for every candidate situation, with selected rank/status, so ranking can be reviewed without uploading full raw detections.
+- Record total distinct and omitted scenes when a group exceeds the scene cap, and include category/model counts and review-context notes.
+- Rename mixed precipitation/snowfall situations to reflect the dominant precipitation category rather than implying a primarily snow event.
+- Preserve existing thresholds, geographic footprints, event ranking, Python 3.6 standard-library dependencies, and operational converter / cron / publication / retention behavior.
+
+## v1.4.45 — 2026-11-10
+
+- Bound experimental event groups by overall spatial diameter and time span, eliminating unrestricted transitive chaining of unrelated storms.
+- Select the latest compatible common GFSv16/GFSv17 initialization within a bounded lookback, even when the two models have different newest cycles.
+- Record clearer GFS comparison coverage and group geographic span diagnostics.
+- Preserve read-only operation, Python 3.6.8 compatibility and all operational converter, cron, publication and viewer behavior.
+
+## v1.4.44 — 2026-11-10
+
+- Refined the experimental event scanner with grouped weather situations, diverse ranking, and detailed detector field-hour coverage diagnostics.
+- Tightened broad Caribbean open-water selection while preserving Central America and model-native coverage limits.
+- Added additive experimental JSON schema v2 with `event_groups`, model/category breakdowns and per-model missing-data explanations.
+- Operational conversion, publication, retention, cron, and viewer functions unchanged.
+
+## v1.4.43 — November 9, 2026
+
+- Add isolated read-only discovery of notable forecast events from completed Zarr v2 stores; Python 3.6.8 and standard library only.
+- Apply separate geographic policies: regional CONUS and vicinity versus GFS/AI North America, Hawaii, Puerto Rico and adjacent areas; intersect masks with published native grid coverage at coarse and refined scan stages.
+- Add configurable preview schema, threshold/region examples, event rankings and GFS version comparisons; preserve operational converters and crons unchanged.
+
+## v1.4.42 — November 9, 2026
+
+- Add whole-poll process-tree performance sampling to the AI incremental cron, using the existing common settings and bounded retention; matching GFS and regional cron samplers remain unchanged.
+- Add fine-grained GFS and AI forecast-hour, local/remote acquisition, GRIB decoding, Zarr commit, sounding, marine, difference materialization, catalog and publication timings. Include model/hour labels, run configuration and selected-work counts without exposing credentials or source URLs in telemetry.
+- Record GFS historical-case process-tree resource use when performance monitoring is enabled.
+- Correct concurrent metric attribution: thread-local counters prevent overlapping worker threads from double-counting other workers' compression, byte and write-time metrics, while nested timing-only sub-stages avoid counting the same metrics twice.
+- Add read-only `summarize_performance_logs.py` to inspect recent completed-report coverage. Monitoring remains opt-in, uses only the standard library and `/proc`, and never changes processing, worker limits, locks, files or publication semantics.
+
 ## v1.4.41 (2026-11-09)
 
 Native 925-hPa specific humidity and dewpoint support for the GFS, AI, and regional model pipelines, with same-level thermodynamic derivation where required. Existing fields and source paths retained.

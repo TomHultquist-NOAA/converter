@@ -21,8 +21,10 @@ import threading
 import time
 import traceback
 
-_METRICS = {}
-_METRICS_LOCK = threading.Lock()
+# Per-thread counters prevent overlapping hourly worker tasks from crediting
+# another worker's compression/download bytes to their own stage. We keep
+# process-wide resource sampling in PerformanceMonitor unchanged.
+_METRICS_LOCAL = threading.local()
 
 
 def _utc_now():
@@ -69,15 +71,17 @@ def add_metric(name, value):
         value = float(value)
         if not math.isfinite(value):
             return
-        with _METRICS_LOCK:
-            _METRICS[name] = _METRICS.get(name, 0.0) + value
+        bucket = getattr(_METRICS_LOCAL, 'values', None)
+        if bucket is None:
+            bucket = {}
+            _METRICS_LOCAL.values = bucket
+        bucket[name] = bucket.get(name, 0.0) + value
     except Exception:
         pass
 
 
 def metric_snapshot():
-    with _METRICS_LOCK:
-        return dict(_METRICS)
+    return dict(getattr(_METRICS_LOCAL, 'values', {}))
 
 
 def metric_delta(before):
@@ -106,13 +110,22 @@ def stage(name, **details):
                      status=status, error=error, details=details)
 
 
-def timed_task(category, labeler=None):
-    """Decorator for per-hour/per-store worker functions."""
+def timed_task(category, labeler=None, include_metrics=True):
+    """Decorator for per-hour/per-store worker functions.
+
+    Set include_metrics=False for sub-stages nested inside hourly tasks, so
+    their timing is reported without double-counting the same compression,
+    download or disk-write counters in aggregate metrics.
+    """
     def decorate(function):
         @functools.wraps(function)
         def wrapped(*args, **kwargs):
+            # A disabled opt-in monitor must not incur per-task instrumentation
+            # overhead on the ordinary forecast processing path.
+            if not os.environ.get('EVU_PERF_EVENTS_FILE'):
+                return function(*args, **kwargs)
             started = time.monotonic()
-            before = metric_snapshot()
+            before = metric_snapshot() if include_metrics else {}
             label = None
             task_id = '%s-%s-%.6f' % (os.getpid(), threading.current_thread().ident, started)
             record_event('task_start', category=category, task_id=task_id)
@@ -131,7 +144,8 @@ def timed_task(category, labeler=None):
             finally:
                 record_event('task', category=category, label=label, task_id=task_id,
                              elapsed_seconds=round(time.monotonic() - started, 4),
-                             status=status, metrics=metric_delta(before))
+                             status=status,
+                             metrics=metric_delta(before) if include_metrics else {})
         return wrapped
     return decorate
 

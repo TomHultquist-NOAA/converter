@@ -1,0 +1,12 @@
+{
+  "precip_6h_mm": 40.0,
+  "snow_6h_cm": 15.0,
+  "gust_kt": 45.0,
+  "wind_10m_kt": 40.0,
+  "low_mslp_hpa": 985.0,
+  "cape_jkg": 2500.0,
+  "uh_m2s2": 100.0,
+  "gfs_mslp_difference_hpa": 7.0,
+  "gfs_500hpa_height_difference_dm": 7.0,
+  "gfs_850hpa_temperature_difference_k": 5.0
+}

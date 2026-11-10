@@ -1,24 +1,19 @@
-# Performance monitoring — paused by default
+# Performance monitoring coverage — v1.4.42
 
-**Current policy (v1.4.39): Performance sampling is disabled by default.**
-Ordinary processing, error, acquisition and publication logs remain enabled.
-Existing reports from the earlier architecture can be removed safely without
-removing any model data or the operating logs:
+Monitoring remains **opt-in**, controlled by `EVU_PERF_ENABLED=1` in the existing shared configuration. This release adds the previously missing whole-poll AI monitor and AI/GFS task-level timings, while preserving the established model, observation, sounding, case, and publication reports. It does not alter the number of forecast workers, process concurrency, forecast fields, protected cycles or output files.
+
+Every completed monitored invocation creates up to four files under `logs/performance/`: `_samples.jsonl` (CPU, memory and disk I/O over time), `_events.jsonl` (stage/hour/task/transfer events), `_summary.json` and `_summary.txt`. Ordinary cron/error logs under `logs/` are separate and unaffected. A skipped cron run, incomplete run, inventory-only check, disabled monitoring, or model with no eligible data might have no full task records. The AI/GFS child script summaries contain detailed hour stages, while the cron-level reports cover the combined process tree. **Do not add these separate duration, CPU or byte totals together**, because both can observe the same work.
+
+The GFS and AI sub-stages include local/remote inventory/acquisition, GRIB crop/IEEE decode, per-hour processing, Zarr commit, GFS sounding and marine processing, difference generation and per-store delta publication. Existing regional/verification task logs remain enabled when opted in. Download, compression and Zarr-write counters are thread-local to prevent attribution to concurrent workers; nested sub-stage timings are intentionally timing-only so byte counters are not double counted.
+
+To see which workflows have generated complete reports recently:
 
 ```bash
-python3 cleanup_performance_logs.py                  # preview only
-python3 cleanup_performance_logs.py --apply           # delete only old performance reports
+python3 summarize_performance_logs.py --hours 24
+python3 summarize_performance_logs.py --hours 72 --log-dir /path/to/logs/performance
 ```
 
-If the live `converter_config.sh` still has `export EVU_PERF_ENABLED=1`,
-change it to `export EVU_PERF_ENABLED=0` before the next cron invocation.
-For a custom telemetry directory, add `--log-dir /path/to/performance`.
-Avoid cleaning an active monitor; stop its invocation first.
-
-Performance instrumentation is preserved for future opt-in benchmarking:
-`EVU_PERF_ENABLED=1` re-enables it, using the existing sample interval and
-retention controls. This does not affect the model and verification worker
-limits, protected cases, or ordinary operational logs.
+The report is read-only and can show `no completed report in this window` for workflows that have not executed. Treat it as a visibility tool, not a failure monitor. Reports are pruned by the existing retention policy; the monitor requires Python standard library and Linux `/proc` only. Keep the sampling interval >= 5 seconds on busy shared systems unless diagnosing a short-lived problem.
 
 ---
 
@@ -39,7 +34,7 @@ export EVU_PERF_RETENTION_DAYS=7
 # Optional: export EVU_PERF_LOG_DIR=/path/to/performance/logs
 ```
 
-The shipped `converter_config.example.sh` includes these defaults. Monitoring requires only the Python standard library and Linux `/proc`; it does not require `psutil`, `h5py`, or any package installation. GLM continues to use the already-installed `netCDF4` package.
+The shipped `converter_config.example.sh` includes these settings but keeps monitoring disabled by default until explicitly enabled. Monitoring requires only the Python standard library and Linux `/proc`; it does not require `psutil`, `h5py`, or any package installation. GLM continues to use the already-installed `netCDF4` package.
 
 - `EVU_PERF_ENABLED=1`: opt in to monitoring (default is disabled).
 - `EVU_PERF_ENABLED=0`: disable monitoring.
@@ -56,7 +51,7 @@ Each run creates four files with a shared `evu_perf_...` run identifier:
 - `*_summary.json`: machine-readable aggregate results.
 - `*_summary.txt`: concise human-readable report.
 
-All three cron wrappers (hourly verification, 15-minute model incremental, and 30-minute GFS incremental) create whole-cron process-tree reports after acquiring their processing locks. Individual Python entry points also produce focused reports during normal cron use. A historical `create_case.py --execute` run produces one parent case report covering its subprocess tree, plus detailed stage/task events from child workflows. Nested child tools contribute events to the parent case report instead of creating duplicate process-tree monitors.
+All four cron wrappers (hourly verification, incremental regional models, GFS, and AI) create whole-cron process-tree reports after acquiring their processing locks. Individual Python entry points also produce focused reports during normal cron use. A historical `create_case.py --execute` run produces one parent case report covering its subprocess tree, plus detailed stage/task events from child workflows. Nested child tools contribute events to the parent case report instead of creating duplicate process-tree monitors.
 
 ## Measurements
 
@@ -102,4 +97,4 @@ For the first review, the most useful files are the `*_summary.txt` and `*_summa
 
 ## GFS monitoring coverage
 
-The GFS cron launches `perf_monitor.py --watch-pid` with the `gfs_incremental_cron` label and the same `EVU_PERF_*` settings used by the other cron jobs. Reports are located under `logs/performance/` by default. The GFS sampler captures process-tree CPU, memory, disk I/O, and elapsed time, including converter subprocesses while they are running. GFS-specific per-hour event timings are not yet instrumented inside `gfs_to_zarr.py`; avoid interpreting an absence of per-hour GFS events as an absence of processing.
+The GFS cron launches the `gfs_incremental_cron` whole-poll process sampler. The separate `gfs_conversion` report records per-hour processing, source acquisition, decoding, compression/Zarr commits, soundings, marine products and differences where those tasks ran. The AI cron similarly records `ai_incremental_cron` and `ai_conversion`, including all AI/GEFS member-mean models and both local/remote source paths. Do not sum child and whole-poll resource totals. Use `summarize_performance_logs.py` to see which workflows have complete reports.

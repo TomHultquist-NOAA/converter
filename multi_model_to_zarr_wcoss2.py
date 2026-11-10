@@ -2317,6 +2317,7 @@ def _published_files_snapshot(store):
     return result
 
 
+@perf_monitor.timed_task('publish_store_delta', lambda a,k: a[0].name, include_metrics=False)
 def _publish_delta(store, catalog, work_root, host, remote_dir, keep_archive=False,
                    publish_mode='auto'):
     """Full bootstrap, then transfer only changed Zarr chunks and atomic catalog.

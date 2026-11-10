@@ -40,6 +40,36 @@ PUBLISH_DIR="${PUBLISH_DIR:-/home/people/emc/www/htdocs/users/verification_restr
 PROTECTED_CYCLES_FILE="${PROTECTED_CYCLES_FILE:-$BASE_DIR/protected_cycles.json}"
 NO_PUBLISH="${NO_PUBLISH:-0}"
 [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] && (( RETENTION_DAYS >= 1 && RETENTION_DAYS <= 366 )) || { echo 'Invalid AI retention'; exit 2; }
+# Low-overhead whole-poll samples for the AI model family. Each ai_to_zarr
+# child also records per-model/hour task timings when telemetry is enabled.
+# Start AFTER both case and incremental locks to avoid reports for skipped polls.
+EVU_PERF_ENABLED="${EVU_PERF_ENABLED:-0}"
+EVU_PERF_SAMPLE_SECONDS="${EVU_PERF_SAMPLE_SECONDS:-5}"
+EVU_PERF_RETENTION_DAYS="${EVU_PERF_RETENTION_DAYS:-$RETENTION_DAYS}"
+if [[ "$EVU_PERF_RETENTION_DAYS" =~ ^[0-9]+$ ]] && (( EVU_PERF_RETENTION_DAYS > RETENTION_DAYS )); then
+  EVU_PERF_RETENTION_DAYS="$RETENTION_DAYS"
+fi
+EVU_PERF_LOG_DIR="${EVU_PERF_LOG_DIR:-$BASE_DIR/logs/performance}"
+export EVU_PERF_ENABLED EVU_PERF_SAMPLE_SECONDS EVU_PERF_RETENTION_DAYS EVU_PERF_LOG_DIR
+AI_PERF_MONITOR_PID=""
+ai_perf_cleanup() {
+  if [[ -n "${AI_PERF_MONITOR_PID:-}" ]]; then
+    kill -TERM "$AI_PERF_MONITOR_PID" 2>/dev/null || true
+    wait "$AI_PERF_MONITOR_PID" 2>/dev/null || true
+  fi
+}
+trap ai_perf_cleanup EXIT
+if [[ "$EVU_PERF_ENABLED" == 1 && -r "$BASE_DIR/perf_monitor.py" ]]; then
+  if mkdir -p "$EVU_PERF_LOG_DIR" 2>/dev/null; then
+    "$PYTHON_BIN" "$BASE_DIR/perf_monitor.py" --watch-pid "$$" \
+      --label "ai_incremental_cron" --log-dir "$EVU_PERF_LOG_DIR" \
+      --interval "$EVU_PERF_SAMPLE_SECONDS" --retention-days "$EVU_PERF_RETENTION_DAYS" &
+    AI_PERF_MONITOR_PID=$!
+  else
+    echo "WARNING: AI performance log directory unavailable: $EVU_PERF_LOG_DIR" >&2
+  fi
+fi
+
 # Optional provider endpoint overrides are environment settings, not hardcoded
 # alternate mirrors; named exactly as in ai_to_zarr.py's --*-base arguments.
 [[ "$AI_LOCAL_WORKERS" =~ ^[0-9]+$ ]] && (( AI_LOCAL_WORKERS >= 1 )) || { echo 'Invalid AI_LOCAL_WORKERS'; exit 2; }

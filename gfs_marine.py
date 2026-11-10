@@ -18,6 +18,7 @@ import urllib.error
 
 # The operational GFS-Wave inventory is the common-denominator contract.
 # In particular, MAXWH is not in that inventory, and is deliberately omitted.
+import perf_monitor
 SPECS = {
  'wave_height_sig': ('HTSGW', 'surface', 'm', 'Significant wave height'),
  'wave_height_wind': ('WVHGT', 'surface', 'm', 'Wind-wave significant height'),
@@ -87,6 +88,7 @@ def decode_one(source,record,wgrib2,shape,grid,target,directional=False):
  return raw
 
 
+@perf_monitor.timed_task('gfs_marine_hour', lambda a,k: '%s %s%s F%03d' % (a[0], a[2], a[3], a[4]))
 def process_hour(model,gfs,date,cycle,hour,root,wgrib2,nx,ny,west,south,step):
  with tempfile.TemporaryDirectory(prefix='evu_gfs_wave_') as tmp:
   tmp=Path(tmp)
@@ -121,6 +123,7 @@ def process_hour(model,gfs,date,cycle,hour,root,wgrib2,nx,ny,west,south,step):
   return hour,'complete',fields,''
 
 
+@perf_monitor.timed_task('gfs_marine_ingest', lambda a,k: '%s%s' % (a[3], a[4]), include_metrics=False)
 def ingest(gfs,output,work,date,cycle,hours,root16,root17,wgrib2,workers,compression,force=False,models=('gfs_v16','gfs_v17')):
  """Process only missing wave hours for already-committed atmospheric leads."""
  touched=[]

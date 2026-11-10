@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import zlib
 
+import perf_monitor
 PRODUCTS = {
     'gfs_diff_v17_v16': ('gfs_v17', 'gfs_v16'),
     'gfs_diff_v16_analysis': ('gfs_v16', 'analysis'),
@@ -61,6 +62,7 @@ def compatible(left, right):
     return all(a.get(k)==b.get(k) for k in keys)
 
 
+@perf_monitor.timed_task('gfs_difference_materialization', lambda a,k: '%s%s' % (a[1], a[2]))
 def compute(root, date, cycle, hours, compression=3, *, force=False):
     """Return stores changed; safe to retry when one source arrives later."""
     import gfs_to_zarr as gfs

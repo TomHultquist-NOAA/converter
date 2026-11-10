@@ -31,6 +31,7 @@ import zlib
 for _key in ('OMP_NUM_THREADS', 'OMP_THREAD_LIMIT', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS'):
     os.environ[_key] = '1'
 
+import perf_monitor
 import multi_model_to_zarr_wcoss2 as shared
 from retention_policy import load_policy
 
@@ -140,6 +141,7 @@ def source_local_paths(model, date, cycle, hour, local_bases=None):
             source_urls(model, date, cycle, hour, {model: str(base)}).items()}
 
 
+@perf_monitor.timed_task('ai_local_inventory', include_metrics=False)
 def local_inventory(path, wgrib2):
     """Inventory a read-only local GRIB; .idx if present, wgrib2 -s otherwise.
 
@@ -168,6 +170,7 @@ def local_inventory(path, wgrib2):
     return rows
 
 
+@perf_monitor.timed_task('ai_local_acquisition', include_metrics=False)
 def copy_local_selected(path, ordered, output_path):
     """Copy only selected GRIB messages from local data, streaming ranges."""
     chosen = [{'record': item['record']} for item in ordered]
@@ -275,6 +278,7 @@ def vorticity_500(u, v, nx, ny, step):
     return pack(result)
 
 
+@perf_monitor.timed_task('ai_grib_decode', lambda a,k: a[5], include_metrics=False)
 def cropped_ieee(wgrib2, selected, cropped, ieee, nrec, model):
     # Retain native grid points; never bilinearly regrid ensemble mean products.
     subprocess.run([wgrib2, str(selected), '-small_grib',f'{WEST:g}:{EAST:g}',
@@ -317,6 +321,7 @@ def decode_inventory(rows, hour, model, wgrib2, scratch, populate_subset):
             'inventory_size': len(rows)}
 
 
+@perf_monitor.timed_task('ai_remote_part', lambda a,k: '%s F%03d' % (a[3],a[2]), include_metrics=False)
 def retrieve_part(client, url, hour, model, wgrib2, scratch):
     """HTTP/S3 acquisition (GEFS always, other AI only when opted in)."""
     try:
@@ -330,6 +335,7 @@ def retrieve_part(client, url, hour, model, wgrib2, scratch):
             [{'record': item['record']} for item in ordered], dest))
 
 
+@perf_monitor.timed_task('ai_local_part', lambda a,k: '%s F%03d' % (a[2],a[1]), include_metrics=False)
 def retrieve_local_part(path, hour, model, wgrib2, scratch):
     """Acquire just the required records from the shared operational GRIB."""
     try:
@@ -340,6 +346,7 @@ def retrieve_local_part(path, hour, model, wgrib2, scratch):
         return {'available': False, 'reason': 'Local file: ' + str(exc), 'records': {}}
 
 
+@perf_monitor.timed_task('ai_forecast_hour', lambda a,k: '%s %s%s F%03d' % (a[0],a[1],a[2],a[3]))
 def process_hour(model, date, cycle, hour, bases, wgrib2, timeout, retries,
                  local_bases=None, ai_source='local', nomads_fallback=False,
                  network_gate=None):
@@ -378,7 +385,10 @@ def process_hour(model, date, cycle, hour, bases, wgrib2, timeout, retries,
             except Exception as exc:
                 LOG.warning('%s F%03d %s processing failed: %s', model, hour, part, exc)
                 parts[part] = False
-    return {'model': model, 'hour': hour, 'records': records, 'parts': parts}
+    result_status = ('complete' if parts and all(parts.values()) else
+                     ('partial' if any(parts.values()) else 'unavailable'))
+    return {'model': model, 'hour': hour, 'records': records, 'parts': parts,
+            'status': result_status}
 
 
 def create_store(store,model,date,cycle,compression):
@@ -425,6 +435,7 @@ def ensure_field(store,model,name,compression):
              'source_fields':['u500','v500']} if name=='absv500' else {})},compression)
 
 
+@perf_monitor.timed_task('ai_zarr_commit', lambda a,k: '%s F%03d' % (a[1],a[2]['hour']))
 def commit_hour(store,model,result,compression):
     h=result['hour'];nx,ny=dimensions(model);n=nx*ny
     new=[];pending=[]
@@ -569,6 +580,7 @@ def cleanup_local(out,work,protected,retention_days,dry=False):
     return removed
 
 
+@perf_monitor.timed_task('ai_catalog_publication')
 def publish_catalog(catalog,host,remote_dir):
     import shlex
     import publish_transport
@@ -578,6 +590,7 @@ def publish_catalog(catalog,host,remote_dir):
     publish_transport.run(['ssh',host,'cd '+shlex.quote(remote_dir)+' && mv -f '+shlex.quote(target)+' '+shlex.quote(catalog.name)],check=True)
 
 
+@perf_monitor.timed_task('ai_remote_cleanup')
 def remote_cleanup(host,remote_dir,protected,days,dry=False):
     import publish_transport
     import shlex
@@ -615,6 +628,7 @@ def parse_hours(value,model):
     return tuple(sorted(hours))
 
 
+@perf_monitor.monitored('ai_conversion')
 def run(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--date',required=True,help='YYYYMMDD')
@@ -679,6 +693,12 @@ def run(argv=None):
         protected=policy.model_stores if policy else frozenset()
     except (OSError,ValueError,RuntimeError) as exc:
         parser.error(str(exc))
+    perf_monitor.record_event('run_config', workflow='ai_conversion', date=a.date, cycle=a.cycle,
+        models=list(models), hours_by_model={key:len(value) for key,value in selected.items()},
+        local_workers=a.local_workers, remote_workers=a.remote_workers,
+        max_hour_jobs=a.max_hour_jobs, source_mode=a.ai_source,
+        nomads_fallback=a.nomads_fallback, publish=not a.no_publish,
+        inventory_only=a.inventory_only)
     bases={m:getattr(a,m+'_base',None) for m in MODELS}
     local_bases = {m: getattr(a, m+'_local_base', None) for m in LOCAL_MODELS}
     network_gate = threading.BoundedSemaphore(a.remote_workers)
@@ -719,6 +739,9 @@ def run(argv=None):
             candidates=[h for h in hours if eligible(h)]
             if a.max_hour_jobs:candidates=candidates[:a.max_hour_jobs]
             LOG.info('%s %s %s selected %d of %d 6-hourly leads',model,a.date,a.cycle,len(candidates),len(hours))
+            perf_monitor.record_event('work_selection', workflow='ai_conversion', model=model,
+                eligible_hours=len(candidates), requested_hours=len(hours),
+                already_complete_or_deferred=len(hours)-len(candidates))
             if a.inventory_only:
                 client=core.HTTPClient(timeout=a.timeout,retries=a.retries)
                 for h in candidates[:3]:

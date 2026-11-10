@@ -28,6 +28,7 @@ import zlib
 for _k in ('OMP_NUM_THREADS', 'OMP_THREAD_LIMIT', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
     os.environ[_k] = '1'
 
+import perf_monitor
 import multi_model_to_zarr_wcoss2 as shared
 import gfs_profiles as profiles
 import sounding_profiles as sounding
@@ -178,6 +179,7 @@ def validate_grid_description(grid: str):
         raise ValueError('Cropped GFS domain does not match the configured un-interpolated grid')
 
 
+@perf_monitor.timed_task('gfs_local_acquisition', include_metrics=False)
 def local_selected_grib(source: Path, rows, selection, target: Path):
     """Copy complete message ranges from a local v17 GRIB2, no external GRIB tools."""
     targets = sorted((v[0] for v in selection.values()), key=lambda row: row['msg'])
@@ -194,6 +196,7 @@ def local_selected_grib(source: Path, rows, selection, target: Path):
     return targets
 
 
+@perf_monitor.timed_task('gfs_range_acquisition', include_metrics=False)
 def fetch_v16_grib(client, url, rows, selection, target: Path):
     reqs = [{'record': rec} for rec, _ in selection.values()]
     reqs.sort(key=lambda x: x['record']['msg'])
@@ -201,6 +204,7 @@ def fetch_v16_grib(client, url, rows, selection, target: Path):
     return [r['record'] for r in reqs]
 
 
+@perf_monitor.timed_task('gfs_grib_decode', include_metrics=False)
 def cropped_ieee(wgrib2, selected: Path, cropped: Path, ieee: Path, count: int):
     # -small_grib preserves the input grid points and native spacing. -new_grid
     # must NOT be used: it may interpolate the data and would inflate output.
@@ -329,6 +333,7 @@ def write_manifest(work_root, store, manifest):
     core.json_write(manifest_path(work_root, store), manifest)
 
 
+@perf_monitor.timed_task('gfs_forecast_hour', lambda a,k: '%s %s%s F%03d' % (a[0], a[1], a[2], a[3]))
 def process_hour(model, date, cycle, hour, v17_root, v16_root, wgrib2, timeout, retries, profile_enabled=True, profile_only=False):
     """Worker phase: I/O and decoding only. Coordinator commits chunks atomically."""
     client = core.HTTPClient(timeout=timeout, retries=retries)
@@ -431,6 +436,7 @@ def process_hour(model, date, cycle, hour, v17_root, v16_root, wgrib2, timeout, 
                 'source': str(source), 'selected': len(ordered), 'supplemental_profile_records': supplement_count}
 
 
+@perf_monitor.timed_task('gfs_zarr_commit', lambda a,k: '%s F%03d' % (a[0].name, a[2]['hour']))
 def commit_hour(store, work, result, compression):
     hour = result['hour']
     raw = result['fields']
@@ -592,6 +598,7 @@ def clean_local(output, work, protected, days=7, dry_run=False, now=None):
     return removed
 
 
+@perf_monitor.timed_task('gfs_catalog_publication')
 def publish_catalogs_only(output, work, host, remote_dir):
     """Catalog updates after cleanup; upload only the two GFS catalog files."""
     import shlex
@@ -608,6 +615,7 @@ def publish_catalogs_only(output, work, host, remote_dir):
                                shlex.quote(target) + ' ' + shlex.quote(source.name)], check=True)
 
 
+@perf_monitor.timed_task('gfs_store_publication')
 def publish_stores(output, work, host, remote_dir, paths):
     shared.validate_publisher(host, remote_dir)
     for store in paths:
@@ -617,6 +625,7 @@ def publish_stores(output, work, host, remote_dir, paths):
         shared._publish_delta(store, output / f'catalog_{model}.json', work, host, remote_dir)
 
 
+@perf_monitor.timed_task('gfs_remote_cleanup')
 def cleanup_remote(host, remote_dir, protected, days, dry_run=False):
     """Delegate to a narrow allowlist; prevent directory traversal/symlink deletion."""
     import shlex
@@ -717,6 +726,7 @@ def parse(argv=None):
     return a
 
 
+@perf_monitor.monitored('gfs_conversion')
 def run(argv=None):
     # Configure logging BEFORE parse(): load_protected_cycles() calls
     # logging.info(), which can install the default WARNING-level handler.
@@ -728,6 +738,10 @@ def run(argv=None):
                         format='%(asctime)s %(levelname)s %(message)s')
     logging.getLogger().setLevel(log_level)
     a = parse(argv)
+    perf_monitor.record_event('run_config', workflow='gfs_conversion', date=a.date, cycle=a.cycle,
+        models=list(a.models), selected_hours=len(a.hours), workers=a.workers,
+        max_hour_jobs=a.max_hour_jobs, inventory_only=a.inventory_only,
+        publish=not a.no_publish, profiles=not a.skip_profiles)
     out, work = a.output_root.expanduser().resolve(), a.work_root.expanduser().resolve()
     if len(out.parts) < 3 or len(work.parts) < 3 or out == work or out.is_symlink() or work.is_symlink():
         raise ValueError('Unsafe processing output/work root')
@@ -763,6 +777,9 @@ def run(argv=None):
             if a.max_hour_jobs:
                 candidates = candidates[:a.max_hour_jobs]
             logging.info('%s %s%s selected %d/%d 3-hourly leads', model, a.date, a.cycle, len(candidates), len(a.hours))
+            perf_monitor.record_event('work_selection', workflow='gfs_conversion', model=model,
+                eligible_hours=len(candidates), requested_hours=len(a.hours),
+                already_complete_or_deferred=len(a.hours)-len(candidates))
             if a.inventory_only and not candidates:
                 logging.warning('%s inventory: no eligible leads; use --force-hours to inspect already completed or recently checked hours', model)
             if a.inventory_only:
